@@ -55,13 +55,18 @@ public sealed class GrappleHook : Component
 			if ( !IsAttached ) TryFire( tuning );
 			else Release();
 		}
+	}
 
-		if ( IsAttached )
-		{
-			Gizmo.Draw.LineThickness = 2f;
-			Gizmo.Draw.Color = Color.Yellow;
-			Gizmo.Draw.Line( WorldPosition, AnchorPoint );
-		}
+	protected override void DrawGizmos()
+	{
+		base.DrawGizmos();
+
+		if ( !IsAttached ) return;
+
+		Gizmo.Draw.LineThickness = 2f;
+		Gizmo.Draw.Color = Color.Yellow;
+
+		Gizmo.Draw.Line( WorldPosition, AnchorPoint );
 	}
 
 	protected override void OnFixedUpdate()
@@ -81,7 +86,7 @@ public sealed class GrappleHook : Component
 		if ( distance < 0.01f ) return;
 		var dir = toAnchor / distance;
 
-		bool reelingIn  = Input.Down( "GrappleReelIn" );
+		bool reelingIn = Input.Down( "GrappleReelIn" );
 		bool reelingOut = Input.Down( "GrappleReelOut" );
 
 		if ( reelingIn && Stamina > 0f )
@@ -113,7 +118,7 @@ public sealed class GrappleHook : Component
 			}
 
 			var hitRb = _hitObject.IsValid()
-				? ( _hitObject.GetComponentInParent<Rigidbody>() ?? _hitObject.GetComponent<Rigidbody>() )
+				? (_hitObject.GetComponentInParent<Rigidbody>() ?? _hitObject.GetComponent<Rigidbody>())
 				: null;
 			if ( hitRb.IsValid() )
 			{
@@ -133,7 +138,7 @@ public sealed class GrappleHook : Component
 
 		if ( tuning.AirDrag > 0f )
 		{
-			Cc.Velocity *= 1f - ( tuning.AirDrag * dt );
+			Cc.Velocity *= 1f - (tuning.AirDrag * dt);
 		}
 	}
 
@@ -156,10 +161,10 @@ public sealed class GrappleHook : Component
 			_hitObject = trace.GameObject;
 			if ( _hitObject.IsValid() )
 			{
-				_hitLocalOffset = _hitObject.WorldRotation.Inverse * ( trace.HitPosition - _hitObject.WorldPosition );
+				_hitLocalOffset = _hitObject.WorldRotation.Inverse * (trace.HitPosition - _hitObject.WorldPosition);
 			}
 			AnchorPoint = trace.HitPosition;
-			CurrentMaxLineLength = ( AnchorPoint - WorldPosition ).Length;
+			CurrentMaxLineLength = (AnchorPoint - WorldPosition).Length;
 			IsAttached = true;
 		}
 	}

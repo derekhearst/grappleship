@@ -35,7 +35,7 @@ GrappleShip/
 │   │   └── sources.md
 │   └── grappleship/          # game-specific docs (create when design lands)
 │       └── grappleship.md
-└── game/                     # the .sbproj and game code (created by editor)
+└── grappleship/                     # the .sbproj and game code (created by editor)
 ```
 
 ## Domain docs

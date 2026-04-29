@@ -1,14 +1,14 @@
 {
-  "dotnet.defaultSolution": "grappleship/grappleship.sln",
-  "omnisharp.defaultLaunchSolution": "grappleship/grappleship.sln",
-  "files.exclude": {
-    "**/.sbox": true,
-    "**/bin": true,
-    "**/obj": true
-  },
-  "files.watcherExclude": {
-    "**/.sbox/**": true,
-    "**/bin/**": true,
-    "**/obj/**": true
-  }
+	"dotnet.defaultSolution": "grappleship/grappleship.slnx",
+	"omnisharp.defaultLaunchSolution": "grappleship/grappleship.slnx",
+	"files.exclude": {
+		"**/.sbox": true,
+		"**/bin": true,
+		"**/obj": true
+	},
+	"files.watcherExclude": {
+		"**/.sbox/**": true,
+		"**/bin/**": true,
+		"**/obj/**": true
+	}
 }

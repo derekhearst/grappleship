@@ -20,7 +20,6 @@ This file is a **living document.** Update it whenever a workflow rule, lesson, 
 - **Engine:** s&box (Source 2 + .NET / C#), released 2026-04-28.
 - **Build:** Hot-reloaded by s&box editor on file save. No separate build step.
 - **Input config:** `grappleship/ProjectSettings/Input.config`. Add custom actions there, don't bind raw keys in code.
-- **Bridge:** [Sbox-Claude](https://github.com/LouSputthole/Sbox-Claude) MCP server lets Claude drive the editor. Useful but buggy — see "Bridge gotchas" below.
 
 ---
 
@@ -28,47 +27,24 @@ This file is a **living document.** Update it whenever a workflow rule, lesson, 
 
 ### Code changes
 
-- **Always edit `.cs` files directly** with `Write`/`Edit`. Never use the bridge's `create_script` — it ignores the `content` parameter and writes empty stubs.
+- **Always edit `.cs` files directly** with `Write`/`Edit`.
 - After saving, the s&box editor hotloads in milliseconds. No manual rebuild needed.
-- If you need to confirm hotload picked something up, call `mcp__sbox__trigger_hotload` — that one works.
 
 ### Scene structure changes
 
-Two paths, pick by case:
-
-| Change | Path |
-|---|---|
-| Create GameObject, set parent, add component (no value tweaks), assign model, add physics | **Bridge** — these tools are reliable. |
-| Set a bool / number / `Vector3` / component-reference property | **Edit `Assets/scenes/minimal.scene` directly** OR ask the user to drag/check in the inspector. The bridge's `set_property` only accepts string values; passing `false`/`0`/component refs errors with `'requires String, but target has type False/Number'`. |
-| Reload scene from disk after a manual edit | The bridge's `load_scene` does **not** force-discard the editor's in-memory state. Ask the user to reload, or include the change in the next `save_scene` flow carefully. |
-| Inspect what's on a component | `mcp__sbox__get_all_properties` — works perfectly, names + types + values. **Always use this before guessing an API.** |
+- **Edit `Assets/scenes/minimal.scene` directly** for property changes (bools, numbers, `Vector3`, component refs).
+- For structural changes (creating GameObjects, adding components), either edit the scene JSON or ask the user to do it in the inspector.
+- After a direct-disk scene edit, ask the user to reload the scene in the editor (File → Open Recent → minimal.scene).
 
 ### Discovering APIs
 
-Before writing code that touches any unfamiliar s&box type, call `mcp__sbox__describe_type` and/or `mcp__sbox__search_types`. This is how we learned that `Sandbox.PlayerController` is the built-in (not `facepunch.playercontroller`'s) and that `Sandbox.Input` only takes registered action names — not raw key names.
+Before writing code that touches any unfamiliar s&box type, check the [cheat sheet](docs/sbox/cheat-sheet.md) first. If a pattern isn't there, look it up and add it.
 
 ### Stuff Claude can't do; ask the user
 
-- Toggling bool properties on components (bridge limitation — `false` errors out).
-- Wiring component-reference properties (e.g. `Renderer`, `Target`) — bridge accepts the value but doesn't always persist.
+- Wiring component-reference properties (e.g. `Renderer`, `Target`) in the inspector.
 - Anything that requires the editor's "Project Settings" UI (input rebinds done via UI, prefab creation, etc.).
 - Confirming "this feels good" — Phase 1 is all about feel, only the human can judge that.
-
----
-
-## Bridge gotchas
-
-Found through pain. If you hit one of these, don't burn time on it — work around.
-
-| Tool | Bug | Workaround |
-|---|---|---|
-| `create_script` | Ignores `content` param, writes empty stub. | Use `Write` directly to `Code/<Name>.cs`. |
-| `set_property` | Only accepts string values. Bool / number / component-ref → "requires String" error. Strings work. | Edit scene JSON directly OR ask user to set in inspector. |
-| `load_scene` | Doesn't discard the editor's in-memory state when scene is already loaded. Disk edits are silently ignored. | Ask user to reload scene manually (File → Open Recent), or restart editor. |
-| `get_compile_errors` | Returns "Unknown command". | Use `list_available_components` with a filter — if the component shows up, it compiled. |
-| `add_component_with_properties` | Sometimes auto-spawns dependent components (e.g. adding `CharacterController` adds `Rigidbody` + `MoveModeWalk` + a `Colliders` child). Not a bug per se, just surprising. | Inspect with `get_scene_hierarchy` after, expect extras. |
-
-The static-ctor bug in the bridge addon was already patched locally in `grappleship/Libraries/sboxskinsgg.claudebridge/Editor/MyEditorMenu.cs` lines 33–55. The marker comment is there — don't undo it.
 
 ---
 
@@ -106,11 +82,13 @@ public sealed class MyThing : Component
 - Use `[ReadOnly]` for fields you want visible in the inspector for debugging but never settable.
 - Prefer `sealed` unless we explicitly need inheritance.
 
-### DebugTuning singleton pattern
+### Tunables on the component itself
 
-Tunable values that multiple components read live on a single `DebugTuning` GameObject in the scene. Components query it via `DebugTuning.GetCurrent(Scene)`. This lets us tweak grapple/movement/etc. parameters live in the editor while the game runs without recompiling.
+Put `[Property, Range(...)]` tunable values **directly on the component that uses them**, grouped with `[Group("Tuning — ...")]`. They show up as sliders in the inspector when the user clicks that component — no separate GameObject to hunt for.
 
-When adding a new tunable, add it to `Code/DebugTuning.cs` with a sensible default and a `[Group(...)]`.
+The earlier `DebugTuning` singleton pattern (separate scene-wide GameObject) was confusing in practice — users intuitively look for grapple knobs on the GrappleHook component, not on a separate scene object. The class still exists as an empty deprecated stub so existing scene references don't error; the `DebugTuning` GameObject can be deleted from the scene any time.
+
+When values are shared across multiple components (later: ship hover values read by both helmsman input and the hover physics), prefer a small dedicated component for that shared concern, not a generic catch-all.
 
 ### Component vs GameObject references
 
@@ -150,19 +128,17 @@ Then read it via `Input.Down("ActionName")` / `Input.Pressed("ActionName")`. **D
 
 ## Scene editing conventions
 
-- The scene is a JSON file at `grappleship/Assets/scenes/minimal.scene`. Reading and surgical-editing it via `Edit` is fine and sometimes the only way (see "set_property bug" above).
+- The scene is a JSON file at `grappleship/Assets/scenes/minimal.scene`. Reading and surgical-editing it via `Edit` is fine.
 - Component refs in the scene file are GUID strings, **not** wrapper objects.
-- After a direct-disk scene edit, ask the user to reload the scene in the editor (File → Open Recent → minimal.scene). `mcp__sbox__load_scene` is unreliable for this.
-- Don't `mcp__sbox__save_scene` after a direct-disk edit — it'll overwrite your edit with the in-memory state.
+- After a direct-disk scene edit, ask the user to reload the scene in the editor (File → Open Recent → minimal.scene).
 
 ---
 
 ## Known issues / live observations
 
 - **`facepunch.playercontroller` library is installed but unused.** When I added a "PlayerController" component, s&box matched the built-in `Sandbox.PlayerController` (newer, has MoveMode system, ThirdPerson toggle, etc.). The FP library has obsolete-API warnings (`Transform.Position` → `WorldPosition`, etc.) — not an error, just noise. Likely safe to remove the library.
-- **Bridge addon has a fragile static constructor.** Patched locally; flagged for upstream report. See `grappleship/Libraries/sboxskinsgg.claudebridge/Editor/MyEditorMenu.cs` lines 33–55.
 - **`PlayerController.ThirdPerson` defaults to `true`** in the built-in. Always check this on a fresh Player setup.
-- **`PlayerController.Renderer` (SkinnedModelRenderer slot)** must be wired to the citizen body GameObject for `HideBodyInFirstPerson` to work. Bridge can't reliably set this — drag in the inspector.
+- **`PlayerController.Renderer` (SkinnedModelRenderer slot)** must be wired to the citizen body GameObject for `HideBodyInFirstPerson` to work. Drag in the inspector.
 
 ---
 
@@ -173,19 +149,24 @@ Append as we hit them. Don't delete — even outdated lessons explain why someth
 - **2026-04-28** — `Sandbox.PlayerController` is the built-in, distinct from `facepunch.playercontroller.PlayerController`. They're API-incompatible. The built-in is what s&box matches when you add a "PlayerController" component.
 - **2026-04-28** — `Input.Down(string)` only accepts registered action names. Add custom actions to `ProjectSettings/Input.config`. Raw key strings (`"Q"`, `"q"`) silently return false.
 - **2026-04-28** — When applying rope tension, apply force to the anchor object **whenever the rope is taut**, not only when the player is moving away. Otherwise the snap-back makes the cube force a one-frame ghost — the cube never actually moves.
-- **2026-04-28** — The s&box editor's in-memory state survives `load_scene`. Disk-edit-then-reload is racy; prefer in-memory edits via the bridge OR ask the user to reload manually.
+- **2026-04-28** — The s&box editor's in-memory state doesn't auto-refresh from disk. After editing a scene file directly, ask the user to reload manually.
 - **2026-04-28** — `facepunch.playercontroller` declares its `PlayerController` class **in the global namespace** (no `namespace` keyword). When you write `[Property] public PlayerController Pc` in any of our files, C# resolves to that one — not `Sandbox.PlayerController`. Always fully-qualify as `Sandbox.PlayerController` when you mean the built-in (or remove the FP library).
 - **2026-04-28** — `Rotation.Inverse` is a **property** on a Rotation instance, not a static method. Use `someRotation.Inverse`, not `Rotation.Inverse(someRotation)`.
 - **2026-04-28** — When code fails to compile, hotload silently falls back to the **previously-working version**. Symptoms: changes don't appear to take effect. Always check the editor's Console for `Compiler CS####` errors after a code change.
-- **2026-04-28** — `Sandbox.PlayerController.Velocity` is **read-only**. The writable surface is `Sandbox.CharacterController.Velocity` (or use `CharacterController.Punch(Vector3)` for impulses). PlayerController's Velocity is just a getter. To apply grapple force / external impulses, hold a `[Property] public CharacterController Cc` reference and write to `Cc.Velocity`. Use `mcp__sbox__describe_type` (with `canWrite` field) before assuming a property is settable.
+- **2026-04-28** — `Sandbox.PlayerController.Velocity` is **read-only**. The writable surface is `Sandbox.CharacterController.Velocity` (or use `CharacterController.Punch(Vector3)` for impulses). PlayerController's Velocity is just a getter. To apply grapple force / external impulses, hold a `[Property] public CharacterController Cc` reference and write to `Cc.Velocity`. Check the s&box docs or cheat sheet before assuming a property is settable.
 - **2026-04-28** — Default Rigidbody mass on physics props can be 500–1000 kg (cubes use `MassOverride: 500`). To make grapple-pull on cubes feel snappy, the force needs to be much higher than what we use for the player constraint — exposed as a separate `ObjectPullForce` on DebugTuning (default 8000 N). Also `Sleeping = false` before applying force, otherwise a sleeping body ignores small forces.
 - **2026-04-28** — Inspector sliders come from `[Range(min, max)]` on a `[Property]`. Add it to numeric tunables for live-tweaking. Bools and strings don't need it.
+- **2026-04-29** — Removed `sboxskinsgg.claudebridge` MCP bridge (too buggy/outdated). Scene edits go through direct file editing or user in the inspector.
+- **2026-04-29** — When applying tension force to a `Rigidbody` resting on the floor, **`+=` on `PhysicsBody.Velocity` gets clobbered between fixed updates** by the contact-constraint solver — even huge forces (200,000 N for a 732 kg cube) saw velocity decay from 5.46 → 0.01 in one tick. The "fix" we tried (set Velocity directly + disable gravity on the cube) made it feel weird (zero-g cube floating around, snapping at max length). Superseded by the next entry.
+- **2026-04-29** — **Don't reinvent rope physics.** For a tethered grapple, use a **positional distance constraint** (Branchpanic's [sbox-grapple](https://github.com/branchpanic/sbox-grapple) pattern): each tick, predict `goal = pos + vel * dt`, clamp goal to within `ropeLength` of the anchor, then set `vel = (goal - pos) / dt`. Apply on both ends. Gravity stays on for both — the rope only acts when taut, so bodies swing naturally instead of being "force-pulled". This replaces all the `Cc.Velocity += dir * F * dt` and `hitRb.Gravity = false` hacks we accumulated.
+- **2026-04-29** — **Zero a Rigidbody's `Velocity` and `AngularVelocity` on grapple-fire.** Otherwise stale residual motion (cube was rolling, settling, etc.) makes the very first constraint pass project the cube hard toward the player, looking like an instant teleport. Reset both Rigidbody and PhysicsBody copies on hit.
+- **2026-04-29** — **Pendulum swing requires the anchor above or laterally offset from the player.** Grappling the floor below you and jumping won't produce swing — projection just bounces you off a sphere centered at your feet. The minimal scene needs a tall pillar / overhead anchor to actually feel the rope swing.
 
 ---
 
 ## How to keep this updated
 
-When you (Claude) discover a new gotcha, convention, or fact about s&box / the bridge / this codebase that future-you would benefit from knowing:
+When you (Claude) discover a new gotcha, convention, or fact about s&box / this codebase that future-you would benefit from knowing:
 
 1. Add a one-liner to **Lessons learned** with today's date (use the `currentDate` from session context).
 2. If it's a *rule* (something we should always do or never do), add it to the relevant section above (workflow / code / input / scene).

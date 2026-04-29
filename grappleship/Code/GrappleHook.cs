@@ -127,7 +127,7 @@ public sealed class GrappleHook : Component
 			if ( toGoal.Length > CurrentMaxLineLength )
 			{
 				playerGoal = AnchorPoint + toGoal.Normal * CurrentMaxLineLength;
-				Cc.Velocity = ( playerGoal - WorldPosition ) / dt;
+				Cc.Velocity = (playerGoal - WorldPosition) / dt;
 			}
 		}
 
@@ -135,7 +135,7 @@ public sealed class GrappleHook : Component
 		// If we hooked a Rigidbody, apply the same projection so it swings off the player.
 		// Gravity stays enabled — the cube falls naturally until the rope catches.
 		var hitRb = _hitObject.IsValid()
-			? ( _hitObject.GetComponentInParent<Rigidbody>() ?? _hitObject.GetComponent<Rigidbody>() )
+			? (_hitObject.GetComponentInParent<Rigidbody>() ?? _hitObject.GetComponent<Rigidbody>())
 			: null;
 		if ( hitRb.IsValid() )
 		{
@@ -147,7 +147,7 @@ public sealed class GrappleHook : Component
 			if ( toCubeGoal.Length > CurrentMaxLineLength )
 			{
 				cubeGoal = WorldPosition + toCubeGoal.Normal * CurrentMaxLineLength;
-				var newVel = ( cubeGoal - cubePos ) / dt;
+				var newVel = (cubeGoal - cubePos) / dt;
 				if ( pb.IsValid() )
 				{
 					pb.Sleeping = false;
@@ -163,7 +163,7 @@ public sealed class GrappleHook : Component
 
 		if ( AirDrag > 0f )
 		{
-			Cc.Velocity *= 1f - ( AirDrag * dt );
+			Cc.Velocity *= 1f - (AirDrag * dt);
 		}
 	}
 
@@ -189,7 +189,7 @@ public sealed class GrappleHook : Component
 				_hitLocalOffset = _hitObject.WorldRotation.Inverse * (trace.HitPosition - _hitObject.WorldPosition);
 			}
 			AnchorPoint = trace.HitPosition;
-			CurrentMaxLineLength = MathF.Max( MinLineLength, ( AnchorPoint - WorldPosition ).Length );
+			CurrentMaxLineLength = MathF.Max( MinLineLength, (AnchorPoint - WorldPosition).Length );
 			IsAttached = true;
 
 			// Zero the hit Rigidbody's velocity so any residual motion doesn't make the

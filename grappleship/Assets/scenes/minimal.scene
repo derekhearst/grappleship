@@ -171,7 +171,7 @@
           "CreateAttachments": false,
           "LodOverride": 0,
           "MaterialGroup": null,
-          "MaterialOverride": "materials/sand.vmat",
+          "MaterialOverride": "materials/sand floor.vmat",
           "Materials": null,
           "Model": null,
           "OnComponentDestroy": null,
@@ -2111,7 +2111,7 @@
               "__version": 2,
               "Flags": 0,
               "Name": "Mini Boss 2 (SPEED BUFF?)",
-              "Position": "-9301.47363,4228.13867,-44216.7773",
+              "Position": "-9301.46973,4223.30469,-44220.5312",
               "Rotation": "0,0,0,1",
               "Scale": "70,70,70",
               "Tags": "",
@@ -2131,7 +2131,7 @@
                   "CreateAttachments": false,
                   "LodOverride": null,
                   "MaterialGroup": null,
-                  "MaterialOverride": "materials/fy_pool_day/tile_blue_fpd.vmat",
+                  "MaterialOverride": "materials/dev/dev_measure_blue.vmat",
                   "Materials": null,
                   "Model": "models/dev/sphere.vmdl",
                   "OnComponentDestroy": null,
@@ -2382,17 +2382,17 @@
       "CustomBounds": false
     },
     "GameObjectSystems": {
-      "Sandbox.SelectionSetsSystem": {
-        "Data": {
-          "SelectionSets": []
-        }
-      },
       "Sandbox.MovieMaker.MovieRecorderSystem": {
         "DisableClientRecording": false
       },
       "Sandbox.Clutter.ClutterGridSystem": {
         "Storage": {
-          "$blob": "e9eeef69-b2a0-4995-93d1-dc35f10791d6"
+          "$blob": "8c8d463c-8512-4a12-8293-a5a0ca313a9c"
+        }
+      },
+      "Sandbox.SelectionSetsSystem": {
+        "Data": {
+          "SelectionSets": []
         }
       }
     }
@@ -2401,13 +2401,13 @@
   "Title": "minimal",
   "Description": null,
   "__references": [
-    "damir.damirsand#28702",
     "degg.base_mat_red#10136",
+    "ele.dev_measure_blue#26648",
     "ele.dev_measure_green#26650",
     "ele.dev_measure_purple#26657",
+    "gbonn.sandfloor#49295",
     "kenneynl.shiplarge#87834",
-    "titanovsky.paving_stone_1k#54080",
-    "titanovsky.tile_blue_fpd#43684"
+    "titanovsky.paving_stone_1k#54080"
   ],
   "__version": 3
 }

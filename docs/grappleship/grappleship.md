@@ -187,7 +187,7 @@ These are the dials that will get touched constantly. Build a single **DebugTuni
 
 ## Working notes for AI-assisted development
 
-The bridge between Claude and the s&box editor is live (see [working-with-ai.md](working-with-ai.md) if added later). A few rules of engagement that apply on this project:
+A few rules of engagement that apply on this project:
 
 - **Iterate in small chunks.** "Implement the grapple firing logic" is a good ask. "Build the entire grapple system" is a bad ask. Each chunk should be small enough to run, observe, and decide what to do next.
 - **The Scene API is the workhorse.** `scene.CreateObject()`, `go.AddComponent<T>()`, `scene.Trace.Ray(...)` — these get used constantly.

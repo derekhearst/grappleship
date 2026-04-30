@@ -12,6 +12,7 @@ const RESERVED_COMPONENT_KEYS = new Set([
 	"__type",
 	"__guid",
 	"__enabled",
+	"__version",
 	"Flags",
 	"OnComponentDestroy",
 	"OnComponentDisabled",
@@ -52,12 +53,18 @@ function validateComponent(
 ): void {
 	for (const [key, value] of Object.entries(comp)) {
 		if (RESERVED_COMPONENT_KEYS.has(key)) continue;
+		// Any reserved-looking key (starts with __) is engine metadata.
+		if (key.startsWith("__")) continue;
 		const prop = schema.properties[key];
 		if (!prop) {
+			// Unknown properties on parsed (GrappleShip.*) components are real
+			// errors — we own the schema. On built-in Sandbox.* types our
+			// exported schema may be incomplete (hidden / inherited / engine-
+			// internal properties), so demote to warning.
 			errors.push({
 				path: `${compPath}.${key}`,
 				message: `Unknown property "${key}" on ${comp.__type}.`,
-				severity: "error",
+				severity: schema.source === "parsed" ? "error" : "warning",
 			});
 			continue;
 		}
@@ -107,7 +114,10 @@ function checkValue(value: unknown, prop: PropertySchema): string | null {
 		return parseVector3(value) ? null : `malformed angles: "${value}"`;
 	}
 	if (t === "enum") {
-		if (typeof value !== "string") return `expected enum string, got ${describe(value)}`;
+		// s&box serializes flag enums as integers (e.g. ColliderFlags: 0).
+		// Accept either an integer or a member name.
+		if (typeof value === "number" && Number.isInteger(value)) return null;
+		if (typeof value !== "string") return `expected enum string or integer, got ${describe(value)}`;
 		if (prop.values && !prop.values.includes(value)) {
 			return `enum value "${value}" not in [${prop.values.join(", ")}]`;
 		}

@@ -47,12 +47,29 @@ public static class SchemaExporter
 			if ( fullName.StartsWith( "GrappleShip." ) ) { skipped++; continue; }
 
 			var props = new SortedDictionary<string, object>();
+			var seenNames = new HashSet<string>();
+
+			// Pass 1: every property TypeLibrary knows about (covers [Property]
+			// fields including [Hide]'d ones — they still serialize).
 			foreach ( var prop in typeDesc.Properties )
 			{
-				if ( !prop.HasAttribute<PropertyAttribute>() ) continue;
-				if ( prop.HasAttribute<HideAttribute>() ) continue;
-
+				if ( seenNames.Contains( prop.Name ) ) continue;
+				seenNames.Add( prop.Name );
 				props[prop.Name] = DescribeProperty( typeDesc.TargetType, prop );
+			}
+
+			// Pass 2: also include any public read-write property reachable via
+			// reflection (catches inherited / engine-internal members like
+			// ModelRenderer.LodOverride that the scene serializer writes but
+			// TypeLibrary may filter out).
+			foreach ( var info in typeDesc.TargetType.GetProperties(
+				BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy ) )
+			{
+				if ( seenNames.Contains( info.Name ) ) continue;
+				if ( info.GetIndexParameters().Length > 0 ) continue;
+				if ( !info.CanRead && !info.CanWrite ) continue;
+				seenNames.Add( info.Name );
+				props[info.Name] = DescribePropertyInfo( info );
 			}
 
 			output[fullName] = new SortedDictionary<string, object>
@@ -117,6 +134,19 @@ public static class SchemaExporter
 			entry["values"] = System.Enum.GetNames( prop.PropertyType );
 		}
 
+		return entry;
+	}
+
+	static SortedDictionary<string, object> DescribePropertyInfo( PropertyInfo info )
+	{
+		var entry = new SortedDictionary<string, object>
+		{
+			["type"] = MapType( info.PropertyType ),
+		};
+		if ( info.PropertyType.IsEnum )
+		{
+			entry["values"] = System.Enum.GetNames( info.PropertyType );
+		}
 		return entry;
 	}
 
@@ -187,7 +217,14 @@ public static class SchemaExporter
 		if ( t == typeof( Rotation ) ) return "rotation";
 		if ( t == typeof( Color ) ) return "color";
 		if ( t == typeof( Angles ) ) return "angles";
-		if ( t.IsEnum ) return "enum";
+		if ( t.IsEnum )
+		{
+			// Flags enums serialize as either integers OR named member strings
+			// depending on the engine version / property. Tag permissively so
+			// the validator accepts both.
+			if ( t.IsDefined( typeof( System.FlagsAttribute ), false ) ) return $"unknown:flags:{t.Name}";
+			return "enum";
+		}
 		if ( typeof( Component ).IsAssignableFrom( t ) ) return $"component_ref:{t.Name}";
 		if ( t == typeof( GameObject ) ) return "gameobject_ref";
 		if ( t.IsGenericType ) return $"generic:{t.Name}";
@@ -196,14 +233,27 @@ public static class SchemaExporter
 
 	static string ResolveOutputPath()
 	{
-		// Project layout (from s&box editor): the addon lives at
-		// <repo-root>/grappleship/.  Schema lives at <repo-root>/docs/sbox/.
-		// The editor's content root maps to <repo-root>/grappleship, so we
-		// step up once.
-		var contentRoot = Editor.FileSystem.Content.GetFullPath( "/" );
-		var repoRoot = Path.GetDirectoryName( contentRoot.TrimEnd( Path.DirectorySeparatorChar, '/' ) );
-		var dir = Path.Combine( repoRoot, "docs", "sbox" );
-		Directory.CreateDirectory( dir );
-		return Path.Combine( dir, "builtin-types.json" );
+		// Walk up from the editor's content root looking for the marker file
+		// (.mcp.json at the repo root). This is more robust than guessing
+		// the directory layout — we landed in <repo>/grappleship/docs/sbox/
+		// the first time because Content.GetFullPath was deeper than we
+		// expected.
+		var start = Editor.FileSystem.Content.GetFullPath( "/" );
+		var dir = new DirectoryInfo( start );
+		for ( int i = 0; i < 8 && dir != null; i++ )
+		{
+			if ( File.Exists( Path.Combine( dir.FullName, ".mcp.json" ) ) )
+			{
+				var outDir = Path.Combine( dir.FullName, "docs", "sbox" );
+				Directory.CreateDirectory( outDir );
+				return Path.Combine( outDir, "builtin-types.json" );
+			}
+			dir = dir.Parent;
+		}
+		// Fallback: write next to the addon and log loudly.
+		Log.Warning( "[SchemaExporter] Could not find .mcp.json marker; writing next to addon." );
+		var fallback = Path.Combine( start, "docs", "sbox" );
+		Directory.CreateDirectory( fallback );
+		return Path.Combine( fallback, "builtin-types.json" );
 	}
 }

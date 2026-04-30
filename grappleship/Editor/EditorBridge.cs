@@ -1,91 +1,81 @@
-using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 
 namespace GrappleShip.EditorTools;
 
 /// <summary>
-/// Minimal file-drop IPC for the GrappleShip MCP server. The MCP writes
-/// req-&lt;id&gt;.json into &lt;tmp&gt;/grappleship-bridge/, the bridge processes one
-/// request per editor frame on the main thread, and writes res-&lt;id&gt;.json
-/// back. Used for things that genuinely need the editor (schema export,
-/// scene reloads, button presses) — everything else lives in the static
-/// MCP tooling.
+/// Minimal file-drop IPC. The MCP writes req-&lt;id&gt;.json into
+/// &lt;tmp&gt;/grappleship-bridge/, the bridge picks one up per editor frame
+/// (throttled to every ~10 frames so we don't hammer the disk), processes it
+/// on the main thread, and writes res-&lt;id&gt;.json back.
+///
+/// Deliberately minimal: no Timer, no ConcurrentQueue, no static constructor,
+/// nothing that touches the editor at type-load time. Everything happens
+/// inside the [EditorEvent.Frame] handler, which the editor only invokes
+/// once it's actually ready.
 /// </summary>
 public static class EditorBridge
 {
 	const string IpcDirName = "grappleship-bridge";
 
-	static readonly ConcurrentQueue<string> _incoming = new();
 	static readonly UTF8Encoding _utf8NoBom = new( false );
-	static Timer _scanner;
-	static readonly object _scanLock = new();
-	static readonly HashSet<string> _seen = new();
-	static bool _running;
+	static int _frameCounter;
+	static bool _logged;
 
-	static EditorBridge()
+	[Menu( "Editor", "GrappleShip/Bridge: Where Is It?" )]
+	public static void ShowDir()
 	{
-		Start();
-	}
-
-	[Menu( "Editor", "GrappleShip/Restart Bridge" )]
-	public static void RestartFromMenu()
-	{
-		_running = false;
-		_scanner?.Dispose();
-		_scanner = null;
-		_seen.Clear();
-		while ( _incoming.TryDequeue( out _ ) ) { }
-		Start();
-		EditorUtility.DisplayDialog( "Bridge restarted", $"Watching {IpcDir()}" );
-	}
-
-	public static void Start()
-	{
-		if ( _running ) return;
-		_running = true;
-		var dir = IpcDir();
-		Directory.CreateDirectory( dir );
-		_scanner = new Timer( _ => Scan(), null, 0, 100 );
-		Log.Info( $"[EditorBridge] watching {dir}" );
-	}
-
-	static string IpcDir()
-	{
-		return Path.Combine( Path.GetTempPath(), IpcDirName );
-	}
-
-	static void Scan()
-	{
-		lock ( _scanLock )
-		{
-			try
-			{
-				var dir = IpcDir();
-				if ( !Directory.Exists( dir ) ) return;
-				foreach ( var path in Directory.EnumerateFiles( dir, "req-*.json" ) )
-				{
-					if ( _seen.Contains( path ) ) continue;
-					_seen.Add( path );
-					_incoming.Enqueue( path );
-				}
-			}
-			catch ( System.Exception e )
-			{
-				Log.Warning( $"[EditorBridge] scan error: {e.Message}" );
-			}
-		}
+		EditorUtility.DisplayDialog( "Bridge directory", IpcDir() );
 	}
 
 	[EditorEvent.Frame]
 	public static void OnFrame()
 	{
-		if ( !_running ) Start();
-		// Process one request per frame to avoid stalling the editor.
-		if ( !_incoming.TryDequeue( out var path ) ) return;
-		HandleRequest( path );
+		// Throttle: only scan every ~10 frames. At 60fps that's 6 scans/sec —
+		// plenty fast for chat-driven IPC, light enough to be invisible.
+		_frameCounter++;
+		if ( _frameCounter % 10 != 0 ) return;
+
+		try
+		{
+			var dir = IpcDir();
+			if ( !Directory.Exists( dir ) )
+			{
+				Directory.CreateDirectory( dir );
+				return;
+			}
+
+			if ( !_logged )
+			{
+				Log.Info( $"[EditorBridge] watching {dir}" );
+				_logged = true;
+			}
+
+			// Pick the oldest pending request, if any.
+			string oldest = null;
+			System.DateTime oldestTime = System.DateTime.MaxValue;
+			foreach ( var path in Directory.EnumerateFiles( dir, "req-*.json" ) )
+			{
+				var t = File.GetCreationTimeUtc( path );
+				if ( t < oldestTime )
+				{
+					oldestTime = t;
+					oldest = path;
+				}
+			}
+			if ( oldest != null ) HandleRequest( oldest );
+		}
+		catch ( System.Exception e )
+		{
+			// Never let the bridge take the editor down.
+			Log.Warning( $"[EditorBridge] frame error: {e.Message}" );
+		}
+	}
+
+	static string IpcDir()
+	{
+		return Path.Combine( Path.GetTempPath(), IpcDirName );
 	}
 
 	static void HandleRequest( string path )
@@ -127,7 +117,6 @@ public static class EditorBridge
 		finally
 		{
 			try { File.Delete( path ); } catch { /* best effort */ }
-			_seen.Remove( path );
 		}
 	}
 
@@ -161,6 +150,7 @@ public static class EditorBridge
 		var json = JsonSerializer.Serialize( payload );
 		var tmp = $"{resPath}.tmp";
 		File.WriteAllText( tmp, json, _utf8NoBom );
-		File.Move( tmp, resPath, overwrite: true );
+		if ( File.Exists( resPath ) ) File.Delete( resPath );
+		File.Move( tmp, resPath );
 	}
 }

@@ -136,6 +136,8 @@ public static class EditorBridge
 				return AssetSearcher.Search( req );
 			case "install_package":
 				return PackageInstaller.Install( req );
+			case "generate_terrain_heightmap":
+				return TerrainGenerator.Generate( req );
 			case "probe_asset_apis":
 				return ProbeAssetApis();
 			case "probe_type":

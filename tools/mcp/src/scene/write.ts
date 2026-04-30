@@ -6,10 +6,15 @@ import type { SceneFile } from "./types";
  * Preserves UTF-8 without BOM. s&box scene files use tab indentation.
  */
 export async function writeScene(path: string, scene: SceneFile): Promise<void> {
-	const json = JSON.stringify(scene, null, "\t");
+	const json = restoreBigInts(JSON.stringify(scene, null, "\t"));
 	const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
 	await writeFile(tmp, json, { encoding: "utf8" });
 	await rename(tmp, path);
+}
+
+/** Counterpart to scene/read.ts:preserveBigInts. Unwrap "@bigint:N" → N. */
+export function restoreBigInts(text: string): string {
+	return text.replace(/"@bigint:(\d+)"/g, "$1");
 }
 
 export function newGuid(): string {

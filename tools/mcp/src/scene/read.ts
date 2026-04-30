@@ -25,7 +25,29 @@ export async function listSceneFiles(scenesRoot: string): Promise<string[]> {
 
 export async function readScene(path: string): Promise<SceneFile> {
 	const text = (await readFile(path, "utf8")).replace(/^﻿/, "");
-	return JSON.parse(text) as SceneFile;
+	return JSON.parse(preserveBigInts(text)) as SceneFile;
+}
+
+/**
+ * JS doesn't have native UInt64. Round-tripping a value like `BodyGroups:
+ * 18446744073709551615` (UInt64.MaxValue, a common "all flags on" sentinel)
+ * through JSON.parse + JSON.stringify silently corrupts it to
+ * `18446744073709552000`. To preserve fidelity, we tag any unquoted integer
+ * literal beyond Number.MAX_SAFE_INTEGER as a string sentinel during parse,
+ * and unwrap it on write (see scene/write.ts).
+ */
+export function preserveBigInts(text: string): string {
+	// Match `: <17+ digit integer>` followed by , } ] or whitespace.
+	return text.replace(/:\s*(\d{16,})(?=\s*[,}\]\n\r])/g, (_match, digits) => {
+		try {
+			if (BigInt(digits) > BigInt(Number.MAX_SAFE_INTEGER)) {
+				return `: "@bigint:${digits}"`;
+			}
+		} catch {
+			// fall through
+		}
+		return _match;
+	});
 }
 
 export function* walkGameObjects(scene: SceneFile): Generator<{ go: GameObjectNode; path: string[] }> {

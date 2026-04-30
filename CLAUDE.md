@@ -30,11 +30,20 @@ This file is a **living document.** Update it whenever a workflow rule, lesson, 
 - **Always edit `.cs` files directly** with `Write`/`Edit`.
 - After saving, the s&box editor hotloads in milliseconds. No manual rebuild needed.
 
-### Scene structure changes
+### Scene / asset / prefab work — use the GrappleShip MCP
 
-- **Edit `Assets/scenes/minimal.scene` directly** for property changes (bools, numbers, `Vector3`, component refs).
-- For structural changes (creating GameObjects, adding components), either edit the scene JSON or ask the user to do it in the inspector.
-- After a direct-disk scene edit, ask the user to reload the scene in the editor (File → Open Recent → minimal.scene).
+The `grappleship` MCP server (in [tools/mcp/](tools/mcp/), auto-started via [.mcp.json](.mcp.json)) is the canonical interface for scene work. **Always prefer MCP tools over hand-editing `.scene` JSON.** Full tool reference: [docs/mcp/mcp.md](docs/mcp/mcp.md).
+
+Workflow:
+
+1. `list_components` / `describe_component` first — schema is authoritative; never guess property names.
+2. `read_scene` / `get_gameobject` to understand current state.
+3. Use mutation tools (`add_component`, `set_property`, etc.) — every mutation is auto-validated; the file is only written if validation passes clean.
+4. After saving, ask the user to reload the scene in the editor.
+
+If `validate_scene` flags `Sandbox.*` components as unknown, the built-in catalog is stale — run the `refresh_builtin_schema` tool (needs the editor open) or ask the user to use the editor menu **Editor → GrappleShip → Refresh Built-in Type Schema**. Then commit `docs/sbox/builtin-types.json`. Custom `GrappleShip.*` components are read live from `.cs` source; no refresh step needed.
+
+After C# edits, use `read_log` / `watch_log` with `level: ["Error", "Warning"]` to check `grappleship/logs/sbox-dev.log` for compile errors before assuming the change took effect (silent compile failure → silent revert is a known s&box gotcha — see Lessons).
 
 ### Discovering APIs
 
@@ -161,6 +170,8 @@ Append as we hit them. Don't delete — even outdated lessons explain why someth
 - **2026-04-29** — **Don't reinvent rope physics.** For a tethered grapple, use a **positional distance constraint** (Branchpanic's [sbox-grapple](https://github.com/branchpanic/sbox-grapple) pattern): each tick, predict `goal = pos + vel * dt`, clamp goal to within `ropeLength` of the anchor, then set `vel = (goal - pos) / dt`. Apply on both ends. Gravity stays on for both — the rope only acts when taut, so bodies swing naturally instead of being "force-pulled". This replaces all the `Cc.Velocity += dir * F * dt` and `hitRb.Gravity = false` hacks we accumulated.
 - **2026-04-29** — **Zero a Rigidbody's `Velocity` and `AngularVelocity` on grapple-fire.** Otherwise stale residual motion (cube was rolling, settling, etc.) makes the very first constraint pass project the cube hard toward the player, looking like an instant teleport. Reset both Rigidbody and PhysicsBody copies on hit.
 - **2026-04-29** — **Pendulum swing requires the anchor above or laterally offset from the player.** Grappling the floor below you and jumping won't produce swing — projection just bounces you off a sphere centered at your feet. The minimal scene needs a tall pillar / overhead anchor to actually feel the rope swing.
+- **2026-04-29** — **GrappleShip MCP server is live** at `tools/mcp/`, auto-started via [.mcp.json](.mcp.json). 28 tools cover schema introspection, scene CRUD (validated), assets, prefabs, log tailing, and an editor IPC bridge. Schema layer reads parsed `.cs` source live + a committed `docs/sbox/builtin-types.json` for `Sandbox.*` types. Full reference: [docs/mcp/mcp.md](docs/mcp/mcp.md). Architectural decision was to keep the MCP file-based (no live editor dependency) so contributors can work with the editor closed; the bridge only exists for the few things that genuinely need engine reflection (built-in schema export, future button-press triggers).
+- **2026-04-29** — **`[Property]` attribute readers must be reflection-tolerant.** s&box's `RangeAttribute`, `GroupAttribute`, etc. don't have stable, documented public field names — early `SchemaExporter.cs` versions used `GroupAttribute.Name` and failed to compile. Fix: read the first matching string field on the attribute via `System.Reflection`, regardless of what it's actually called. Same pattern for `Min`/`Max` on Range. Don't assume the public surface; let reflection find it.
 
 ---
 

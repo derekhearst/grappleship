@@ -3,3 +3,7 @@
 
 # Editor scratch / backup files
 *.scene_d
+
+# MCP server deps
+tools/mcp/node_modules/
+tools/mcp/bun.lockb

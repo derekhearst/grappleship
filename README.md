@@ -21,6 +21,27 @@ Session-based competitive PvP for s&box. Pirate boarding crews on hoverships fig
 
 For the scene/GameObject/Component model, read [docs/sbox/engine-overview.md](docs/sbox/engine-overview.md). Common API snippets are in [docs/sbox/cheat-sheet.md](docs/sbox/cheat-sheet.md).
 
+## Contributing through Claude Code
+
+You don't need to know s&box or C# to add things to scenes. Open this repo in [Claude Code](https://claude.com/claude-code) and chat — the project ships a local MCP server (`tools/mcp/`) that gives Claude type-safe access to scenes, components, prefabs, and assets.
+
+One-time setup:
+
+1. Install [Bun](https://bun.sh): `curl -fsSL https://bun.sh/install | bash` (macOS/Linux) or `powershell -c "irm bun.sh/install.ps1 | iex"` (Windows).
+2. From repo root: `cd tools/mcp && bun install`
+3. Open the repo in Claude Code. The `grappleship` MCP server auto-starts via [.mcp.json](.mcp.json).
+
+That's it. The full tool reference is at [docs/mcp/mcp.md](docs/mcp/mcp.md). Some starter prompts to try:
+
+- *"What scenes do we have?"*
+- *"Show me everything in MainMap."*
+- *"What properties does GrappleHook expose?"*
+- *"Add a tall pillar prop at (500, 0, 200) in MainMap."* — Claude looks up `Sandbox.ModelRenderer` + `Sandbox.BoxCollider`, picks a sensible model, validates, writes.
+- *"Make the Player's grapple feel snappier."* — Claude reads the GrappleHook component on the Player, bumps `ReelSpeed` within range, validates, writes.
+- *"Find me a wood material."* — Claude searches the asset catalog.
+
+If Claude's edit affects what you're looking at in the editor, it'll ask you to reload the scene (File → Open Recent).
+
 ## Repo layout
 
 ```

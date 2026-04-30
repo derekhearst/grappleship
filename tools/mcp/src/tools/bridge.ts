@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { callBridge } from "../bridge/transport";
 import { clearCache, defaultConfig, loadCatalog } from "../schema/loader";
 import type { ToolDef } from "./registry";
@@ -30,3 +31,30 @@ export const refreshBuiltinSchema: ToolDef = {
 		};
 	},
 };
+
+export const installPackage: ToolDef = {
+	name: "install_package",
+	description:
+		"Install a cloud package (e.g. 'arghbeef.vikinghelmet') into the project. Equivalent to the editor's Asset Browser → Install button. Pull the ident from a `find_asset` result with `origin='cloud-uninstalled'`. Returns the primary asset path so you can immediately reference the new asset in scenes. Network round-trip; can take several seconds for large packages.",
+	inputSchema: {
+		type: "object",
+		properties: {
+			ident: { type: "string", description: "Package identifier, e.g. 'arghbeef.vikinghelmet' or 'kenneynl.shiplarge'." },
+		},
+		required: ["ident"],
+		additionalProperties: false,
+	},
+	run: async (args) => {
+		const parsed = z.object({ ident: z.string().min(1) }).parse(args);
+		const res = await callBridge<{
+			ok: boolean;
+			ident: string;
+			package_title?: string;
+			primary_asset?: string;
+			package_type?: string;
+			error?: string;
+		}>("install_package", { ident: parsed.ident }, { timeoutMs: 120000 });
+		return res;
+	},
+};
+

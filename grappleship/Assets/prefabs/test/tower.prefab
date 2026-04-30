@@ -1,0 +1,39 @@
+{
+	"__guid": "5fe995b4-de25-4891-ac27-93e736862532",
+	"__version": 2,
+	"Object": {
+		"__guid": "8042255b-be12-44fd-a030-e1aa6a2a60d8",
+		"__version": 2,
+		"Flags": 0,
+		"Name": "Tower",
+		"Position": "300,0,0",
+		"Rotation": "0,0,0,1",
+		"Scale": "1,1,8",
+		"Tags": "",
+		"Enabled": true,
+		"NetworkMode": 2,
+		"NetworkFlags": 0,
+		"NetworkOrphaned": 0,
+		"NetworkTransmit": true,
+		"OwnerTransfer": 1,
+		"Components": [
+			{
+				"__type": "Sandbox.ModelRenderer",
+				"__guid": "d5497f33-d818-4d59-a584-ad2ff90304b5",
+				"__enabled": true,
+				"Flags": 0,
+				"Model": "models/dev/box.vmdl",
+				"Tint": "0.6,0.4,0.3,1"
+			},
+			{
+				"__type": "Sandbox.BoxCollider",
+				"__guid": "1c0b2960-cf53-4d68-9d35-8e0dcae646a9",
+				"__enabled": true,
+				"Flags": 0,
+				"Scale": "50,50,50",
+				"Static": true
+			}
+		],
+		"Children": []
+	}
+}

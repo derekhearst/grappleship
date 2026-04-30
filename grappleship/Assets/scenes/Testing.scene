@@ -1,10 +1,86 @@
 {
-  "__guid": "00000000-0000-0000-0000-000000000000",
-  "GameObjects": null,
-  "SceneProperties": null,
-  "ResourceVersion": 3,
-  "Title": null,
-  "Description": null,
-  "__references": [],
-  "__version": 3
+	"__guid": "00000000-0000-0000-0000-000000000000",
+	"GameObjects": [
+		{
+			"__guid": "620b3632-59a6-45ea-8550-e377838907cc",
+			"__version": 2,
+			"Flags": 0,
+			"Name": "Sun",
+			"Position": "0,0,0",
+			"Rotation": "0,-0.382,0,0.924",
+			"Scale": "1,1,1",
+			"Tags": "light_directional,light",
+			"Enabled": true,
+			"NetworkMode": 2,
+			"NetworkFlags": 0,
+			"NetworkOrphaned": 0,
+			"NetworkTransmit": true,
+			"OwnerTransfer": 1,
+			"Components": [
+				{
+					"__type": "Sandbox.DirectionalLight",
+					"__guid": "22b0e775-007e-4e0e-b8d3-e393bf1f41f8",
+					"__enabled": true,
+					"Flags": 0,
+					"LightColor": "1,0.95,0.85,1",
+					"Shadows": true
+				}
+			],
+			"Children": []
+		},
+		{
+			"__guid": "c46e2de8-c680-4a4f-8e0d-a9af76fe7056",
+			"__version": 2,
+			"Flags": 0,
+			"Name": "Towers",
+			"Position": "0,0,0",
+			"Rotation": "0,0,0,1",
+			"Scale": "1,1,1",
+			"Tags": "",
+			"Enabled": true,
+			"NetworkMode": 2,
+			"NetworkFlags": 0,
+			"NetworkOrphaned": 0,
+			"NetworkTransmit": true,
+			"OwnerTransfer": 1,
+			"Components": [],
+			"Children": [
+				{
+					"__guid": "fe0687fe-5910-4027-b055-c47303151f9c",
+					"__version": 2,
+					"Flags": 0,
+					"Name": "Tower",
+					"Position": "300,0,200",
+					"Rotation": "0,0,0,1",
+					"Scale": "1,1,8",
+					"Tags": "",
+					"Enabled": true,
+					"NetworkMode": 2,
+					"NetworkFlags": 0,
+					"NetworkOrphaned": 0,
+					"NetworkTransmit": true,
+					"OwnerTransfer": 1,
+					"Components": [
+						{
+							"__type": "Sandbox.ModelRenderer",
+							"__guid": "a549d7a6-5ad7-4ec1-9746-d325fdc7028a",
+							"__enabled": true,
+							"Flags": 0,
+							"Model": "models/dev/box.vmdl",
+							"Tint": "0.8,0.5,0.2,1",
+							"RenderType": "ShadowsOnly",
+							"BodyGroups": 1
+						}
+					],
+					"Children": []
+				}
+			]
+		}
+	],
+	"SceneProperties": null,
+	"ResourceVersion": 3,
+	"Title": null,
+	"Description": null,
+	"__references": [],
+	"__version": 3
 }

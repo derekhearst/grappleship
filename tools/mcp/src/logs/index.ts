@@ -1,5 +1,6 @@
 import { open, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { callBridge, BridgeError } from "../bridge/transport";
 
 export interface LogConfig {
 	repoRoot: string;
@@ -11,13 +12,34 @@ export interface LogLine {
 }
 
 const watchOffsets = new Map<string, number>();
+let cachedLogPath: string | null = null;
 
-function logPath(cfg: LogConfig): string {
+async function logPath(cfg: LogConfig): Promise<string | null> {
+	if (cachedLogPath) return cachedLogPath;
+	// Env var override wins.
+	const env = process.env.GRAPPLESHIP_SBOX_LOG_PATH;
+	if (env) {
+		cachedLogPath = env;
+		return env;
+	}
+	// Ask the editor where its log lives. Cache the answer.
+	try {
+		const res = await callBridge<{ path: string | null }>("get_log_path", {}, { timeoutMs: 3000 });
+		if (res.path) {
+			cachedLogPath = res.path;
+			return res.path;
+		}
+	} catch (err) {
+		if (!(err instanceof BridgeError)) throw err;
+		// Bridge unreachable — editor probably not running. Fall through.
+	}
+	// Last-resort fallback.
 	return join(cfg.repoRoot, "grappleship", "logs", "sbox-dev.log");
 }
 
 export async function readLog(cfg: LogConfig, lines: number, levelFilter?: string[]): Promise<LogLine[]> {
-	const path = logPath(cfg);
+	const path = await logPath(cfg);
+	if (!path) return [];
 	let st;
 	try {
 		st = await stat(path);
@@ -29,7 +51,8 @@ export async function readLog(cfg: LogConfig, lines: number, levelFilter?: strin
 }
 
 export async function watchLog(cfg: LogConfig, levelFilter?: string[]): Promise<LogLine[]> {
-	const path = logPath(cfg);
+	const path = await logPath(cfg);
+	if (!path) return [];
 	let st;
 	try {
 		st = await stat(path);

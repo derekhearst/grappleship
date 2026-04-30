@@ -1,6 +1,6 @@
 import type { ServerConfig } from "../config";
 import { describeAsset, findAsset, listAssets, validateAssetPath } from "./assets";
-import { pingEditor, refreshBuiltinSchema } from "./bridge";
+import { installPackage, pingEditor, refreshBuiltinSchema } from "./bridge";
 import { readLogTool, watchLogTool } from "./logs";
 import {
 	addComponentTool,
@@ -35,6 +35,7 @@ export const tools: ToolDef[] = [
 	// Editor bridge
 	pingEditor,
 	refreshBuiltinSchema,
+	installPackage,
 	// Scene read
 	listScenes,
 	readSceneTool,

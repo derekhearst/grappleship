@@ -56,10 +56,10 @@ It lives at [`tools/mcp/`](../../tools/mcp/) in this repo and starts automatical
 
 | Tool | Purpose |
 |---|---|
-| `list_assets` | Walk `grappleship/Assets/` with optional kind filter. |
-| `find_asset` | Fuzzy-find by name fragment. |
-| `describe_asset` | Metadata (kind, size, mtime). |
-| `validate_asset_path` | Existence check, optional kind verification. |
+| `list_assets` | Walk `grappleship/Assets/` (project) with optional kind filter. Set `include_engine=true` to also pull a sample from the live mounted catalog. |
+| `find_asset` | Fuzzy-find by name fragment across project + every mounted source the editor knows about (engine, workshop, installed cloud packages). Score matches path AND asset name AND package title — matches the Library Manager's displayed name. Pass `include_cloud=true` to ALSO query asset.party for **uninstalled** packages — results come back with `origin="cloud-uninstalled"` and a `package_ident` you can install. |
+| `describe_asset` | Metadata (kind, size, mtime, source). |
+| `validate_asset_path` | Existence check across project + mounted sources, optional kind verification. |
 
 ### Prefabs (4)
 
@@ -70,14 +70,17 @@ It lives at [`tools/mcp/`](../../tools/mcp/) in this repo and starts automatical
 | `instantiate_prefab` | Drop a prefab into a scene with fresh GUIDs and remapped refs. |
 | `create_prefab_from_gameobject` | Extract a subtree to a new `.prefab`. |
 
-### Editor bridge (2) — only works when the s&box editor is running
+### Editor bridge (3) — only works when the s&box editor is running
 
 | Tool | Purpose |
 |---|---|
 | `ping_editor` | Health-check the bridge. |
 | `refresh_builtin_schema` | Re-export `docs/sbox/builtin-types.json` from live engine reflection. |
+| `install_package` | Install a cloud package by ident (e.g. `arghbeef.vikinghelmet`). Pulls from asset.party, mounts it into the project. Same effect as the Asset Browser → Install button. |
 
-**Total: 28 tools.**
+**Total: 29 tools.**
+
+> The asset tools above (`find_asset`, `list_assets`, `describe_asset`, `validate_asset_path`) also use the bridge for live mounted-asset queries (no static cache, no manual refresh). They fall back to project-only search when the editor isn't running.
 
 ## Architecture
 

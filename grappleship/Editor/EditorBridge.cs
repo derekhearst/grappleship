@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -129,9 +130,222 @@ public static class EditorBridge
 			case "refresh_schema":
 				SchemaExporter.ExportSchemaSilent();
 				return new { ok = true };
+			case "get_log_path":
+				return new { path = ResolveLogPath() };
+			case "search_assets":
+				return AssetSearcher.Search( req );
+			case "install_package":
+				return PackageInstaller.Install( req );
+			case "probe_asset_apis":
+				return ProbeAssetApis();
+			case "probe_type":
+				return ProbeType( req );
+			case "probe_url_strings":
+				return ProbeUrlStrings();
+			case "probe_find_async":
+				return ProbeFindAsync( req );
 			default:
 				throw new System.InvalidOperationException( $"unknown action: {action}" );
 		}
+	}
+
+	static object ProbeType( JsonElement req )
+	{
+		var name = req.TryGetProperty( "name", out var el ) ? el.GetString() : null;
+		if ( string.IsNullOrEmpty( name ) ) throw new System.InvalidOperationException( "missing 'name'" );
+		System.Type type = null;
+		foreach ( var asm in System.AppDomain.CurrentDomain.GetAssemblies() )
+		{
+			type = asm.GetType( name, throwOnError: false );
+			if ( type != null ) break;
+		}
+		if ( type == null ) return new { found = false };
+		var members = new List<string>();
+		var flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+		foreach ( var m in type.GetMethods( flags ) )
+		{
+			if ( m.IsSpecialName ) continue;
+			members.Add( $"M{(m.IsStatic ? "[static]" : "")}: {m.Name}({string.Join(",", System.Linq.Enumerable.Select(m.GetParameters(), p => p.ParameterType.Name))}) -> {m.ReturnType.Name}" );
+		}
+		foreach ( var p in type.GetProperties( flags ) )
+		{
+			members.Add( $"P{(p.GetMethod?.IsStatic ?? false ? "[static]" : "")}: {p.Name}: {p.PropertyType.Name}" );
+		}
+		foreach ( var f in type.GetFields( flags ) )
+		{
+			members.Add( $"F{(f.IsStatic ? "[static]" : "")}: {f.Name}: {f.FieldType.Name}" );
+		}
+		return new { found = true, full_name = type.FullName, base_type = type.BaseType?.FullName, members };
+	}
+
+	static object ProbeFindAsync( JsonElement req )
+	{
+		var query = req.TryGetProperty( "query", out var q ) ? q.GetString() : "pirate";
+		System.Type packageType = null;
+		foreach ( var asm in System.AppDomain.CurrentDomain.GetAssemblies() )
+		{
+			packageType = asm.GetType( "Sandbox.Package", false );
+			if ( packageType != null ) break;
+		}
+		if ( packageType == null ) return new { error = "Sandbox.Package not found" };
+
+		// Find FindAsync(string, int, int, CancellationToken)
+		var find = packageType.GetMethod( "FindAsync",
+			BindingFlags.Public | BindingFlags.Static,
+			null,
+			new[] { typeof( string ), typeof( int ), typeof( int ), typeof( System.Threading.CancellationToken ) },
+			null );
+		if ( find == null ) return new { error = "FindAsync(string,int,int,ct) not found" };
+
+		var task = find.Invoke( null, new object[] { query, 5, 0, default( System.Threading.CancellationToken ) } );
+		if ( task == null ) return new { error = "FindAsync returned null" };
+
+		var taskType = task.GetType();
+		var info = new SortedDictionary<string, object>
+		{
+			["task_type"] = taskType.FullName,
+			["return_signature"] = find.ReturnType.FullName,
+		};
+
+		// Try GetAwaiter().GetResult() — handles Task and ValueTask
+		try
+		{
+			var awaiter = task.GetType().GetMethod( "GetAwaiter" )?.Invoke( task, null );
+			if ( awaiter == null )
+			{
+				info["awaiter_found"] = false;
+				return info;
+			}
+			var getResult = awaiter.GetType().GetMethod( "GetResult" );
+			if ( getResult == null )
+			{
+				info["get_result_found"] = false;
+				return info;
+			}
+			var result = getResult.Invoke( awaiter, null );
+			if ( result == null )
+			{
+				info["result"] = "null";
+				return info;
+			}
+			info["result_type"] = result.GetType().FullName;
+			// Dump top-level shape
+			var members = new List<string>();
+			foreach ( var p in result.GetType().GetProperties( BindingFlags.Public | BindingFlags.Instance ) )
+			{
+				try
+				{
+					var v = p.GetValue( result );
+					var summary = v == null ? "null" : v.GetType().Name;
+					if ( v is System.Collections.ICollection col ) summary += $"(count={col.Count})";
+					members.Add( $"{p.Name}: {summary}" );
+				}
+				catch ( System.Exception ex ) { members.Add( $"{p.Name}: <error: {ex.Message}>" ); }
+			}
+			info["members"] = members;
+			// If result IS enumerable, sample first item
+			if ( result is System.Collections.IEnumerable e )
+			{
+				var sampled = new List<string>();
+				int n = 0;
+				foreach ( var item in e )
+				{
+					if ( item == null ) { sampled.Add( "null" ); continue; }
+					var t = item.GetType();
+					var title = t.GetProperty( "Title" )?.GetValue( item );
+					var ident = t.GetProperty( "FullIdent" )?.GetValue( item );
+					sampled.Add( $"{t.Name}: title={title} ident={ident}" );
+					if ( ++n >= 3 ) break;
+				}
+				info["enumerable_sample"] = sampled;
+			}
+		}
+		catch ( System.Exception ex )
+		{
+			info["await_error"] = ex.GetType().FullName + ": " + ex.Message;
+			if ( ex.InnerException != null ) info["inner"] = ex.InnerException.Message;
+		}
+		return info;
+	}
+
+	static object ProbeUrlStrings()
+	{
+		var hits = new List<object>();
+		var seen = new HashSet<string>();
+		foreach ( var asm in System.AppDomain.CurrentDomain.GetAssemblies() )
+		{
+			System.Type[] types;
+			try { types = asm.GetTypes(); }
+			catch { continue; }
+			foreach ( var t in types )
+			{
+				foreach ( var f in t.GetFields( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static ) )
+				{
+					if ( f.FieldType != typeof( string ) ) continue;
+					try
+					{
+						var v = (string)f.GetValue( null );
+						if ( v == null ) continue;
+						if ( !v.Contains( "sbox.game" ) && !v.Contains( "asset.party" )
+							&& !v.Contains( "facepunch.com" ) && !v.Contains( "/api/" ) ) continue;
+						var key = $"{t.FullName}.{f.Name}";
+						if ( seen.Contains( key ) ) continue;
+						seen.Add( key );
+						hits.Add( new { type = t.FullName, field = f.Name, value = v } );
+					}
+					catch { }
+				}
+			}
+		}
+		return new { count = hits.Count, urls = hits };
+	}
+
+	static object ProbeAssetApis()
+	{
+		var hits = new List<object>();
+		foreach ( var asm in System.AppDomain.CurrentDomain.GetAssemblies() )
+		{
+			System.Type[] types;
+			try { types = asm.GetTypes(); }
+			catch { continue; }
+			foreach ( var t in types )
+			{
+				var n = t.FullName ?? "";
+				if ( n.Contains( "Cloud" ) || n.Contains( "Online" )
+					|| n.Contains( "AssetBrowser" ) || n.EndsWith( "AssetSystem" )
+					|| n.EndsWith( ".Asset" ) || n.Contains( "AssetMount" )
+					|| n.Contains( "AssetSource" ) || n.Contains( "AssetLibrary" ) )
+				{
+					var staticMembers = new List<string>();
+					foreach ( var m in t.GetMethods( BindingFlags.Public | BindingFlags.Static ) )
+					{
+						if ( m.DeclaringType != t ) continue;
+						staticMembers.Add( $"M:{m.Name}({string.Join(",", System.Linq.Enumerable.Select(m.GetParameters(), p => p.ParameterType.Name))})" );
+					}
+					foreach ( var p in t.GetProperties( BindingFlags.Public | BindingFlags.Static ) )
+					{
+						if ( p.DeclaringType != t ) continue;
+						staticMembers.Add( $"P:{p.Name}:{p.PropertyType.Name}" );
+					}
+					hits.Add( new { full_name = n, assembly = asm.GetName().Name, members = staticMembers } );
+				}
+			}
+		}
+		return new { count = hits.Count, types = hits };
+	}
+
+	static string ResolveLogPath()
+	{
+		// s&box writes to <install>/logs/sbox-dev.log. Find it by walking up
+		// from the running assembly's base directory.
+		var dir = new DirectoryInfo( System.AppDomain.CurrentDomain.BaseDirectory );
+		for ( int i = 0; i < 8 && dir != null; i++ )
+		{
+			var candidate = Path.Combine( dir.FullName, "logs", "sbox-dev.log" );
+			if ( File.Exists( candidate ) ) return candidate;
+			dir = dir.Parent;
+		}
+		return null;
 	}
 
 	static void WriteResponse( string id, bool ok, object result, string error )

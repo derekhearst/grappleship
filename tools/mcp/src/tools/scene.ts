@@ -119,11 +119,13 @@ export const validateSceneTool: ToolDef = {
 		const scene = await readScene(path);
 		const catalog = await loadCatalog(defaultConfig(cfg.repoRoot));
 		const errors = validateScene(scene, catalog);
+		const errCount = errors.filter((e) => e.severity === "error").length;
+		const warnCount = errors.filter((e) => e.severity === "warning").length;
 		return {
 			scene_path: relative(cfg.repoRoot, path).replace(/\\/g, "/"),
-			error_count: errors.filter((e) => e.severity === "error").length,
-			warning_count: errors.filter((e) => e.severity === "warning").length,
-			ok: errors.length === 0,
+			error_count: errCount,
+			warning_count: warnCount,
+			ok: errCount === 0,
 			errors,
 		};
 	},

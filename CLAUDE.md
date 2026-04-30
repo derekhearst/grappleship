@@ -9,9 +9,9 @@ This file is a **living document.** Update it whenever a workflow rule, lesson, 
 ## Status
 
 - **Current phase:** Phase 1 — Player grapple feel.
-- **What exists in code:** `DebugTuning` (live tunables), `GrappleHook` (fire/anchor/reel/release/stamina). `MyComponent.cs` from the s&box template is empty and unused.
-- **Player controller:** s&box's **built-in** `Sandbox.PlayerController` (with `MoveModeWalk`). Not `facepunch.playercontroller` — that's installed as a library but unused. May remove later.
-- **Scene:** `Assets/scenes/minimal.scene`. Plane + 3 cubes (grapple targets) + Sun + Skybox + Player + Camera + DebugTuning singleton.
+- **What exists in code:** `GrappleHook` (fire/anchor/reel/release/stamina). All tunables live as `[Property]` fields directly on the component.
+- **Player controller:** s&box's **built-in** `Sandbox.PlayerController` (with `MoveModeWalk`).
+- **Scene:** `Assets/scenes/minimal.scene`. Plane + 3 cubes (grapple targets) + Sun + Skybox + Player + Camera.
 
 ---
 
@@ -95,14 +95,14 @@ public sealed class MyThing : Component
 
 Put `[Property, Range(...)]` tunable values **directly on the component that uses them**, grouped with `[Group("Tuning — ...")]`. They show up as sliders in the inspector when the user clicks that component — no separate GameObject to hunt for.
 
-The earlier `DebugTuning` singleton pattern (separate scene-wide GameObject) was confusing in practice — users intuitively look for grapple knobs on the GrappleHook component, not on a separate scene object. The class still exists as an empty deprecated stub so existing scene references don't error; the `DebugTuning` GameObject can be deleted from the scene any time.
+The earlier `DebugTuning` singleton pattern (separate scene-wide GameObject) was confusing in practice — users intuitively look for grapple knobs on the GrappleHook component, not on a separate scene object. Removed entirely on 2026-04-30.
 
 When values are shared across multiple components (later: ship hover values read by both helmsman input and the hover physics), prefer a small dedicated component for that shared concern, not a generic catch-all.
 
 ### Component vs GameObject references
 
 - For **same-GameObject** dependencies (e.g. `GrappleHook` needs `PlayerController` on the same object), use `GetComponent<T>()` in `OnStart` with `??=` so an inspector override still wins.
-- For **scene-wide** singletons (DebugTuning), use `Scene.GetAll<T>().FirstOrDefault()` — see the cheat sheet at [docs/sbox/cheat-sheet.md](docs/sbox/cheat-sheet.md).
+- For **scene-wide** singletons, use `Scene.GetAll<T>().FirstOrDefault()` — see the cheat sheet at [docs/sbox/cheat-sheet.md](docs/sbox/cheat-sheet.md).
 
 ### When in doubt, follow the cheat sheet
 
@@ -145,7 +145,6 @@ Then read it via `Input.Down("ActionName")` / `Input.Pressed("ActionName")`. **D
 
 ## Known issues / live observations
 
-- **`facepunch.playercontroller` library is installed but unused.** When I added a "PlayerController" component, s&box matched the built-in `Sandbox.PlayerController` (newer, has MoveMode system, ThirdPerson toggle, etc.). The FP library has obsolete-API warnings (`Transform.Position` → `WorldPosition`, etc.) — not an error, just noise. Likely safe to remove the library.
 - **`PlayerController.ThirdPerson` defaults to `true`** in the built-in. Always check this on a fresh Player setup.
 - **`PlayerController.Renderer` (SkinnedModelRenderer slot)** must be wired to the citizen body GameObject for `HideBodyInFirstPerson` to work. Drag in the inspector.
 
@@ -159,7 +158,7 @@ Append as we hit them. Don't delete — even outdated lessons explain why someth
 - **2026-04-28** — `Input.Down(string)` only accepts registered action names. Add custom actions to `ProjectSettings/Input.config`. Raw key strings (`"Q"`, `"q"`) silently return false.
 - **2026-04-28** — When applying rope tension, apply force to the anchor object **whenever the rope is taut**, not only when the player is moving away. Otherwise the snap-back makes the cube force a one-frame ghost — the cube never actually moves.
 - **2026-04-28** — The s&box editor's in-memory state doesn't auto-refresh from disk. After editing a scene file directly, ask the user to reload manually.
-- **2026-04-28** — `facepunch.playercontroller` declares its `PlayerController` class **in the global namespace** (no `namespace` keyword). When you write `[Property] public PlayerController Pc` in any of our files, C# resolves to that one — not `Sandbox.PlayerController`. Always fully-qualify as `Sandbox.PlayerController` when you mean the built-in (or remove the FP library).
+- **2026-04-28** — `facepunch.playercontroller` declares its `PlayerController` class **in the global namespace** (no `namespace` keyword). When you write `[Property] public PlayerController Pc` in any of our files, C# resolves to that one — not `Sandbox.PlayerController`. Always fully-qualify as `Sandbox.PlayerController` when you mean the built-in (resolved 2026-04-30 by removing the FP library).
 - **2026-04-28** — `Rotation.Inverse` is a **property** on a Rotation instance, not a static method. Use `someRotation.Inverse`, not `Rotation.Inverse(someRotation)`.
 - **2026-04-28** — When code fails to compile, hotload silently falls back to the **previously-working version**. Symptoms: changes don't appear to take effect. Always check the editor's Console for `Compiler CS####` errors after a code change.
 - **2026-04-28** — `Sandbox.PlayerController.Velocity` is **read-only**. The writable surface is `Sandbox.CharacterController.Velocity` (or use `CharacterController.Punch(Vector3)` for impulses). PlayerController's Velocity is just a getter. To apply grapple force / external impulses, hold a `[Property] public CharacterController Cc` reference and write to `Cc.Velocity`. Check the s&box docs or cheat sheet before assuming a property is settable.

@@ -67,15 +67,6 @@ public sealed class GrappleHook : Component
 		Stamina = StaminaMax;
 	}
 
-	protected override void OnUpdate()
-	{
-		if ( Input.Pressed( "GrappleFire" ) )
-		{
-			if ( !IsAttached ) TryFire();
-			else Release();
-		}
-	}
-
 	protected override void DrawGizmos()
 	{
 		base.DrawGizmos();
@@ -84,9 +75,23 @@ public sealed class GrappleHook : Component
 
 		Gizmo.Draw.LineThickness = 2f;
 		Gizmo.Draw.Color = Color.Yellow;
-
 		Gizmo.Draw.Line( WorldPosition, AnchorPoint );
 	}
+
+
+	protected override void OnUpdate()
+	{
+		if ( Input.Pressed( "GrappleFire" ) )
+		{
+			if ( !IsAttached ) TryFire();
+			else Release();
+		}
+		if ( IsAttached )
+		{
+			DrawGizmos();
+		}
+	}
+
 
 	protected override void OnFixedUpdate()
 	{
@@ -170,8 +175,7 @@ public sealed class GrappleHook : Component
 	void TryFire()
 	{
 		var camera = Scene.GetAllComponents<CameraComponent>()
-			.Where( x => x.IsMainCamera )
-			.FirstOrDefault();
+			.FirstOrDefault( x => x.IsMainCamera );
 		if ( camera is null ) return;
 
 		var origin = camera.WorldPosition;

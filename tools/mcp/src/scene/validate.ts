@@ -87,6 +87,9 @@ function checkValue(value: unknown, prop: PropertySchema): string | null {
 		return typeof value === "boolean" ? null : `expected bool, got ${describe(value)}`;
 	}
 	if (t === "int") {
+		// Big-integer sentinels (UInt64 values like 18446744073709551615 wrapped
+		// as "@bigint:N" strings to survive JS number precision — see scene/read.ts).
+		if (typeof value === "string" && value.startsWith("@bigint:")) return null;
 		if (typeof value !== "number" || !Number.isFinite(value)) return `expected int, got ${describe(value)}`;
 		return checkRange(value, prop);
 	}

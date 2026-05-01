@@ -1,0 +1,18 @@
+{
+  "AlbedoImage": "textures/terrain/damir_sand_color_v2.png",
+  "RoughnessImage": "materials/default/default_rough_s1import.tga",
+  "NormalImage": "textures/terrain/damir_sand_normal.png",
+  "HeightImage": "materials/default/default_ao.tga",
+  "AOImage": "textures/terrain/damir_sand_ao.png",
+  "UVScale": 0.25,
+  "Metalness": 0,
+  "NormalStrength": 1,
+  "HeightBlendStrength": 1,
+  "DisplacementScale": 0,
+  "NoTiling": false,
+  "Surface": null,
+  "__references": [
+    "duccsoft.forest_ground_tmat#60683"
+  ],
+  "__version": 0
+}

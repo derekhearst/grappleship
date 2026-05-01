@@ -138,6 +138,46 @@ public static class EditorBridge
 				return PackageInstaller.Install( req );
 			case "generate_terrain_heightmap":
 				return TerrainGenerator.Generate( req );
+			case "rebuild_terrain":
+				return TerrainGenerator.RebuildTerrain( req );
+			case "add_terrain_material":
+				return TerrainGenerator.AddTerrainMaterial( req );
+			case "list_terrains":
+				return TerrainGenerator.ListTerrains();
+			case "inspect_terrains":
+				return TerrainGenerator.InspectTerrains();
+			case "create_terrain_material":
+				return TerrainGenerator.CreateTerrainMaterial( req );
+			case "set_gameobject_position":
+				return TerrainGenerator.SetGameObjectPosition( req );
+			case "test_asset_paths":
+				return TerrainGenerator.TestAssetPaths( req );
+			case "set_terrain_material_override":
+				return TerrainGenerator.SetMaterialOverride( req );
+			case "inspect_material":
+				return TerrainGenerator.InspectMaterial( req );
+			case "extract_material_texture":
+				return TerrainGenerator.ExtractMaterialTexture( req );
+			case "paint_splatmap_noise":
+				return TerrainGenerator.PaintSplatmapNoise( req );
+			case "paint_splatmap_solid":
+				return TerrainGenerator.PaintSplatmapSolid( req );
+			case "inspect_splatmap":
+				return TerrainGenerator.InspectSplatmap( req );
+			case "compile_asset":
+				return TerrainGenerator.CompileAsset( req );
+			case "compile_asset_verified":
+				return TerrainGenerator.CompileAssetVerified( req );
+			case "inspect_tmat":
+				return TerrainGenerator.InspectTmat( req );
+			case "reload_asset":
+				return TerrainGenerator.ReloadAsset( req );
+			case "create_terrain_material_v2":
+				return TerrainGenerator.CreateTerrainMaterialV2( req );
+			case "probe_create_resource":
+				return ProbeCreateResource( req );
+			case "dump_terrain_storage_json":
+				return DumpTerrainStorageJson();
 			case "probe_asset_apis":
 				return ProbeAssetApis();
 			case "probe_type":
@@ -268,6 +308,71 @@ public static class EditorBridge
 			if ( ex.InnerException != null ) info["inner"] = ex.InnerException.Message;
 		}
 		return info;
+	}
+
+	static object DumpTerrainStorageJson()
+	{
+		// Construct a tiny TerrainStorage in memory, JSON-serialize it, see what the on-disk format looks like.
+		var storageType = FindReflectedType( "Sandbox.TerrainStorage" );
+		if ( storageType == null ) throw new System.InvalidOperationException( "TerrainStorage type not found" );
+		var inst = System.Activator.CreateInstance( storageType );
+		var setRes = storageType.GetMethod( "SetResolution", BindingFlags.Public | BindingFlags.Instance );
+		setRes?.Invoke( inst, new object[] { 8 } );
+		storageType.GetProperty( "TerrainSize" )?.SetValue( inst, 2000f );
+		storageType.GetProperty( "TerrainHeight" )?.SetValue( inst, 200f );
+		// Fill heightmap with a small ramp
+		var hm = storageType.GetProperty( "HeightMap" )?.GetValue( inst ) as ushort[];
+		if ( hm != null )
+		{
+			for ( int i = 0; i < hm.Length; i++ ) hm[i] = (ushort)(i * 1000);
+		}
+		var json = System.Text.Json.JsonSerializer.Serialize( inst, new System.Text.Json.JsonSerializerOptions { WriteIndented = true } );
+		return new { json_length = json.Length, json_preview = json.Length > 4000 ? json.Substring( 0, 4000 ) : json };
+	}
+
+	static System.Type FindReflectedType( string name )
+	{
+		foreach ( var asm in System.AppDomain.CurrentDomain.GetAssemblies() )
+		{
+			var t = asm.GetType( name, false );
+			if ( t != null ) return t;
+		}
+		return null;
+	}
+
+	static object ProbeCreateResource( JsonElement req )
+	{
+		var path = req.TryGetProperty( "path", out var p ) ? p.GetString() : null;
+		var arg = req.TryGetProperty( "arg", out var a ) ? a.GetString() : null;
+		if ( string.IsNullOrEmpty( path ) ) throw new System.InvalidOperationException( "missing 'path'" );
+		if ( arg == null ) throw new System.InvalidOperationException( "missing 'arg'" );
+
+		System.Type assetSystem = null;
+		foreach ( var asm in System.AppDomain.CurrentDomain.GetAssemblies() )
+		{
+			assetSystem = asm.GetType( "Editor.AssetSystem", false );
+			if ( assetSystem != null ) break;
+		}
+		if ( assetSystem == null ) throw new System.InvalidOperationException( "AssetSystem not found" );
+		var method = assetSystem.GetMethod( "CreateResource",
+			BindingFlags.Public | BindingFlags.Static,
+			null,
+			new[] { typeof( string ), typeof( string ) },
+			null );
+		if ( method == null ) throw new System.InvalidOperationException( "CreateResource(string, string) not found" );
+		object result;
+		try { result = method.Invoke( null, new object[] { path, arg } ); }
+		catch ( System.Exception ex )
+		{
+			return new { ok = false, error = ex.GetBaseException().Message };
+		}
+		if ( result == null ) return new { ok = false, error = "returned null" };
+		var resType = result.GetType();
+		var assetPath = resType.GetProperty( "Path" )?.GetValue( result )?.ToString();
+		var assetName = resType.GetProperty( "Name" )?.GetValue( result )?.ToString();
+		var assetTypeProp = resType.GetProperty( "AssetType" )?.GetValue( result );
+		var assetTypeName = assetTypeProp?.GetType().GetProperty( "Name" )?.GetValue( assetTypeProp )?.ToString();
+		return new { ok = true, result_type = resType.FullName, path = assetPath, name = assetName, asset_type = assetTypeName };
 	}
 
 	static object ProbeUrlStrings()

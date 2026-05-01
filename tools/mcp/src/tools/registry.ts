@@ -15,6 +15,7 @@ import {
 import { createPrefabFromGameObject, instantiatePrefab, listPrefabs, readPrefabTool } from "./prefabs";
 import { describeComponent, listComponents, refreshSchema, searchProperty } from "./schema";
 import { getGameObject, listScenes, readSceneTool, validateSceneTool } from "./scene";
+import { compileAssetVerifiedTool, createTerrainMaterialV2Tool, inspectTmatTool, reloadAssetTool } from "./terrain";
 
 export interface ToolDef {
 	name: string;
@@ -60,4 +61,9 @@ export const tools: ToolDef[] = [
 	readPrefabTool,
 	instantiatePrefab,
 	createPrefabFromGameObject,
+	// Terrain & material authoring
+	inspectTmatTool,
+	reloadAssetTool,
+	compileAssetVerifiedTool,
+	createTerrainMaterialV2Tool,
 ];

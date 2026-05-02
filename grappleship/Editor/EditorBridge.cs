@@ -106,7 +106,8 @@ public static class EditorBridge
 			}
 			catch ( System.Exception ex )
 			{
-				error = ex.Message;
+				var inner = ex.GetBaseException();
+				error = inner.Message + " [" + inner.GetType().Name + "]";
 			}
 
 			WriteResponse( id, error == null, result, error );
@@ -150,6 +151,12 @@ public static class EditorBridge
 				return TerrainGenerator.CreateTerrainMaterial( req );
 			case "set_gameobject_position":
 				return TerrainGenerator.SetGameObjectPosition( req );
+			case "set_gameobject_rotation":
+				return TerrainGenerator.SetGameObjectRotation( req );
+			case "set_directional_light":
+				return TerrainGenerator.SetDirectionalLight( req );
+			case "set_gradient_fog":
+				return TerrainGenerator.SetGradientFog( req );
 			case "test_asset_paths":
 				return TerrainGenerator.TestAssetPaths( req );
 			case "set_terrain_material_override":
@@ -158,12 +165,20 @@ public static class EditorBridge
 				return TerrainGenerator.InspectMaterial( req );
 			case "extract_material_texture":
 				return TerrainGenerator.ExtractMaterialTexture( req );
+			case "probe_material_slots":
+				return TerrainGenerator.ProbeMaterialSlots( req );
 			case "paint_splatmap_noise":
 				return TerrainGenerator.PaintSplatmapNoise( req );
 			case "paint_splatmap_solid":
 				return TerrainGenerator.PaintSplatmapSolid( req );
+			case "paint_splatmap_multilayer":
+				return TerrainGenerator.PaintSplatmapMultilayer( req );
 			case "inspect_splatmap":
 				return TerrainGenerator.InspectSplatmap( req );
+			case "set_height_blend":
+				return TerrainGenerator.SetHeightBlend( req );
+			case "set_terrain_settings":
+				return TerrainGenerator.SetTerrainSettings( req );
 			case "compile_asset":
 				return TerrainGenerator.CompileAsset( req );
 			case "compile_asset_verified":

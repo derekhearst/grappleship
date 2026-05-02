@@ -1,0 +1,15 @@
+{
+  "AlbedoImage": "textures/terrain/rust_terrain_sand_color.png",
+  "RoughnessImage": "materials/default/default_rough_s1import.tga",
+  "NormalImage": "textures/terrain/rust_terrain_sand_normal.png",
+  "HeightImage": "materials/default/default_ao.tga",
+  "AOImage": "materials/default/default_ao.tga",
+  "UVScale": 250,
+  "UVRotation": 0,
+  "Metalness": 0,
+  "NormalStrength": 2.0,
+  "HeightBlendStrength": 1,
+  "DisplacementScale": 0.5,
+  "__references": [],
+  "__version": 0
+}

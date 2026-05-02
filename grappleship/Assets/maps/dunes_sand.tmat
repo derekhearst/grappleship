@@ -4,7 +4,7 @@
   "NormalImage": "textures/terrain/damir_sand_normal.png",
   "HeightImage": "materials/default/default_ao.tga",
   "AOImage": "textures/terrain/damir_sand_ao.png",
-  "UVScale": 0.25,
+  "UVScale": 0.5,
   "Metalness": 0,
   "NormalStrength": 1,
   "HeightBlendStrength": 1,

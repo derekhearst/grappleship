@@ -62,7 +62,7 @@
           "Flags": 0,
           "FogMode": "Enabled",
           "FogStrength": 1,
-          "LightColor": "0.94419,0.97767,1,1",
+          "LightColor": "1,0.92,0.78,1",
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
           "OnComponentEnabled": null,
@@ -74,7 +74,7 @@
           "ShadowCascadeSplitRatio": 0.91,
           "ShadowHardness": 0,
           "Shadows": true,
-          "SkyColor": "0.2532,0.32006,0.35349,1",
+          "SkyColor": "0.55,0.62,0.72,1",
           "Visualizer": {}
         }
       ],

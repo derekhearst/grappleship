@@ -1,15 +1,15 @@
 {
-  "AlbedoImage": "textures/terrain/damir_sand_color_v2.png",
+  "AlbedoImage": "textures/terrain/damir_sand_color.png",
   "RoughnessImage": "materials/default/default_rough_s1import.tga",
   "NormalImage": "textures/terrain/damir_sand_normal.png",
   "HeightImage": "materials/default/default_ao.tga",
   "AOImage": "textures/terrain/damir_sand_ao.png",
-  "UVScale": 0.5,
+  "UVScale": 100,
+  "UVRotation": 0,
   "Metalness": 0,
-  "NormalStrength": 1,
+  "NormalStrength": 2.0,
   "HeightBlendStrength": 1,
-  "DisplacementScale": 0,
-  "NoTiling": false,
+  "DisplacementScale": 0.5,
   "__references": [],
   "__version": 0
 }

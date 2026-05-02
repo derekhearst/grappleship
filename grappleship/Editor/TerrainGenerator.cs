@@ -210,25 +210,26 @@ public static class TerrainGenerator
 		var asset = findByPath?.Invoke( null, new object[] { tmatPath } );
 		if ( asset == null ) throw new System.InvalidOperationException( $"asset not found: {tmatPath}" );
 
-		// CRITICAL: force a fresh compile *immediately* before LoadResource.
-		// Without this, the cached Sandbox.TerrainMaterial returned by
-		// LoadResource() may have null BCRTexture/NHOTexture handles — the
-		// terrain shader then samples nothing and renders engine-magenta even
-		// though the .tmat_c on disk is fine. Compiling refreshes the engine's
-		// GPU-side texture handles so the next LoadResource picks them up.
-		try
-		{
-			var compileMethod = asset.GetType().GetMethod( "Compile", BindingFlags.Public | BindingFlags.Instance );
-			compileMethod?.Invoke( asset, new object[] { true } );
-		}
-		catch ( System.Exception ex ) { Log.Warning( $"[AddTerrainMaterial] pre-add Compile threw: {ex.GetBaseException().Message}" ); }
-
-		var loadResource = asset.GetType().GetMethods( BindingFlags.Public | BindingFlags.Instance )
-			.FirstOrDefault( m => m.Name == "LoadResource" && m.GetParameters().Length == 0 && !m.IsGenericMethodDefinition );
-		var material = loadResource?.Invoke( asset, null );
-		if ( material == null ) throw new System.InvalidOperationException( $"could not load material from {tmatPath}" );
-		if ( material.GetType().Name != "TerrainMaterial" )
-			throw new System.InvalidOperationException( $"asset is {material.GetType().Name}, expected TerrainMaterial" );
+		// CANONICAL pattern from sbox/addons/tools/code/Scene/Terrain/TerrainMaterialList.cs:
+		//   if ( asset.TryLoadResource<TerrainMaterial>( out var material ) )
+		//   { Terrain.Storage.Materials.Add( material ); Terrain.UpdateMaterialsBuffer(); }
+		//
+		// We use TryLoadResource<TerrainMaterial>(out _) via reflection. The
+		// non-generic LoadResource() overload returns a different cached
+		// instance that ISN'T bound to the engine's GPU material pipeline,
+		// which is why our materials rendered as error magenta even though
+		// inspect_terrains saw valid BCRTexture handles.
+		var tmatType = FindType( "Sandbox.TerrainMaterial" );
+		if ( tmatType == null ) throw new System.InvalidOperationException( "Sandbox.TerrainMaterial type not found" );
+		var tryLoadResource = asset.GetType().GetMethods( BindingFlags.Public | BindingFlags.Instance )
+			.FirstOrDefault( m => m.Name == "TryLoadResource" && m.IsGenericMethodDefinition && m.GetParameters().Length == 1 );
+		if ( tryLoadResource == null ) throw new System.InvalidOperationException( "Editor.Asset.TryLoadResource<T>(out T) not found" );
+		var generic = tryLoadResource.MakeGenericMethod( tmatType );
+		object[] callArgs = new object[] { null };
+		bool loaded = (bool)generic.Invoke( asset, callArgs );
+		var material = callArgs[0];
+		if ( !loaded || material == null )
+			throw new System.InvalidOperationException( $"TryLoadResource<TerrainMaterial> failed for {tmatPath}" );
 
 		// Add to Storage.Materials list.
 		var listProp = terrain.Storage.GetType().GetProperty( "Materials" );
@@ -251,9 +252,10 @@ public static class TerrainGenerator
 			saveMethod?.Invoke( storageAsset, new object[] { terrain.Storage } );
 		}
 
-		// Rebuild GPU.
-		try { terrain.GetType().GetMethod( "Create", BindingFlags.Public | BindingFlags.Instance, null, System.Type.EmptyTypes, null )?.Invoke( terrain, null ); } catch { }
-		try { terrain.SyncGPUTexture(); } catch { }
+		// Canonical sequence from the official editor: ONLY UpdateMaterialsBuffer.
+		// No Create(), no SyncGPUTexture() — those were our extras and may have
+		// been clobbering state.
+		try { terrain.GetType().GetMethod( "UpdateMaterialsBuffer", BindingFlags.Public | BindingFlags.Instance, null, System.Type.EmptyTypes, null )?.Invoke( terrain, null ); } catch ( System.Exception ex ) { Log.Warning( $"[AddTerrainMaterial] UpdateMaterialsBuffer threw: {ex.GetBaseException().Message}" ); }
 
 		// Count items in the list now.
 		var countProp = list.GetType().GetProperty( "Count" );
@@ -419,6 +421,153 @@ public static class TerrainGenerator
 		};
 	}
 
+	/// Add (or update) a Sandbox.GradientFog component on a GameObject. This
+	/// is the desert "horizon hider" — fades distant terrain into a sand-tan
+	/// haze so the terrain edge isn't a hard line. Equivalent to Source's
+	/// 3D skybox horizon meshes.
+	public static object SetGradientFog( JsonElement req )
+	{
+		var goGuid = req.TryGetProperty( "guid", out var g ) ? g.GetString() : null;
+		if ( string.IsNullOrEmpty( goGuid ) ) throw new System.InvalidOperationException( "missing 'guid'" );
+		var sessionType = FindType( "Editor.SceneEditorSession" );
+		var allList = sessionType?.GetProperty( "All", BindingFlags.Public | BindingFlags.Static )?.GetValue( null ) as System.Collections.IEnumerable;
+		if ( allList == null ) throw new System.InvalidOperationException( "no editor sessions" );
+		var targetGuid = System.Guid.Parse( goGuid );
+		Sandbox.GameObject target = null;
+		foreach ( var session in allList )
+		{
+			var scene = session.GetType().GetProperty( "Scene", BindingFlags.Public | BindingFlags.Instance )?.GetValue( session ) as Sandbox.Scene;
+			if ( scene == null ) continue;
+			var go = scene.Directory.FindByGuid( targetGuid );
+			if ( go != null ) { target = go; break; }
+		}
+		if ( target == null ) throw new System.InvalidOperationException( $"GameObject {goGuid} not found" );
+
+		var fogType = FindType( "Sandbox.GradientFog" );
+		if ( fogType == null ) throw new System.InvalidOperationException( "GradientFog type not found" );
+		// Use the generic GetComponent<T>(bool) via reflection.
+		var goType = target.GetType();
+		var getComp = goType.GetMethods( BindingFlags.Public | BindingFlags.Instance )
+			.FirstOrDefault( m => m.Name == "GetComponent" && m.IsGenericMethodDefinition );
+		object fog = null;
+		if ( getComp != null )
+		{
+			var generic = getComp.MakeGenericMethod( fogType );
+			fog = generic.Invoke( target, new object[] { false } );
+		}
+		if ( fog == null )
+		{
+			// Use the generic Components.Create<T>() so we don't have to deal
+			// with TypeDescription resolution.
+			var componentsType = target.Components.GetType();
+			var createGeneric = componentsType.GetMethods( BindingFlags.Public | BindingFlags.Instance )
+				.FirstOrDefault( m => m.Name == "Create" && m.IsGenericMethodDefinition && m.GetParameters().Length <= 1 );
+			if ( createGeneric == null ) throw new System.InvalidOperationException( "Components.Create<T> not found" );
+			var generic2 = createGeneric.MakeGenericMethod( fogType );
+			var ps = generic2.GetParameters();
+			object[] args = ps.Length == 0 ? null : new object[] { true };
+			fog = generic2.Invoke( target.Components, args );
+		}
+		if ( fog == null ) throw new System.InvalidOperationException( "could not get/create GradientFog" );
+
+		// Set props.
+		void SetColor( string prop, string colorStr )
+		{
+			var parts = colorStr.Split( ',' );
+			if ( parts.Length < 3 ) return;
+			float r = float.Parse( parts[0] ); float g2 = float.Parse( parts[1] ); float b = float.Parse( parts[2] );
+			float a = parts.Length > 3 ? float.Parse( parts[3] ) : 1f;
+			fogType.GetProperty( prop )?.SetValue( fog, new Color( r, g2, b, a ) );
+		}
+		void SetFloat( string prop, float v ) => fogType.GetProperty( prop )?.SetValue( fog, v );
+
+		if ( req.TryGetProperty( "color", out var cEl ) ) SetColor( "Color", cEl.GetString() );
+		if ( req.TryGetProperty( "height", out var hEl ) ) SetFloat( "Height", hEl.GetSingle() );
+		if ( req.TryGetProperty( "vertical_falloff", out var vEl ) ) SetFloat( "VerticalFalloffExponent", vEl.GetSingle() );
+		if ( req.TryGetProperty( "start_distance", out var sdEl ) ) SetFloat( "StartDistance", sdEl.GetSingle() );
+		if ( req.TryGetProperty( "end_distance", out var edEl ) ) SetFloat( "EndDistance", edEl.GetSingle() );
+		if ( req.TryGetProperty( "falloff", out var fEl ) ) SetFloat( "FalloffExponent", fEl.GetSingle() );
+
+		return new
+		{
+			ok = true,
+			component_added = true,
+			color = fogType.GetProperty( "Color" )?.GetValue( fog )?.ToString(),
+			start_distance = fogType.GetProperty( "StartDistance" )?.GetValue( fog ),
+			end_distance = fogType.GetProperty( "EndDistance" )?.GetValue( fog ),
+		};
+	}
+
+	/// Set the live Sandbox.DirectionalLight component's LightColor and
+	/// SkyColor on a GameObject. SkyColor is the ambient fill that softens
+	/// shadows — boost it to ~0.55,0.62,0.72 to avoid pitch-black shadows
+	/// at low sun angles.
+	public static object SetDirectionalLight( JsonElement req )
+	{
+		var goGuid = req.TryGetProperty( "guid", out var g ) ? g.GetString() : null;
+		if ( string.IsNullOrEmpty( goGuid ) ) throw new System.InvalidOperationException( "missing 'guid'" );
+		var sessionType = FindType( "Editor.SceneEditorSession" );
+		var allList = sessionType?.GetProperty( "All", BindingFlags.Public | BindingFlags.Static )?.GetValue( null ) as System.Collections.IEnumerable;
+		if ( allList == null ) throw new System.InvalidOperationException( "no editor sessions" );
+		var targetGuid = System.Guid.Parse( goGuid );
+		Sandbox.GameObject target = null;
+		foreach ( var session in allList )
+		{
+			var scene = session.GetType().GetProperty( "Scene", BindingFlags.Public | BindingFlags.Instance )?.GetValue( session ) as Sandbox.Scene;
+			if ( scene == null ) continue;
+			var go = scene.Directory.FindByGuid( targetGuid );
+			if ( go != null ) { target = go; break; }
+		}
+		if ( target == null ) throw new System.InvalidOperationException( $"GameObject {goGuid} not found" );
+
+		var dl = target.GetComponent<Sandbox.DirectionalLight>();
+		if ( dl == null ) throw new System.InvalidOperationException( "no DirectionalLight on this GameObject" );
+
+		object setColor( string prop, string colorStr )
+		{
+			var parts = colorStr.Split( ',' );
+			if ( parts.Length < 3 ) return null;
+			float r = float.Parse( parts[0] ); float g2 = float.Parse( parts[1] ); float b = float.Parse( parts[2] );
+			float a = parts.Length > 3 ? float.Parse( parts[3] ) : 1f;
+			var c = new Color( r, g2, b, a );
+			dl.GetType().GetProperty( prop )?.SetValue( dl, c );
+			return new { r, g = g2, b, a };
+		}
+		object lc = req.TryGetProperty( "light_color", out var lcEl ) ? setColor( "LightColor", lcEl.GetString() ) : null;
+		object sc = req.TryGetProperty( "sky_color", out var scEl ) ? setColor( "SkyColor", scEl.GetString() ) : null;
+		if ( req.TryGetProperty( "shadows", out var shEl ) ) dl.GetType().GetProperty( "Shadows" )?.SetValue( dl, shEl.GetBoolean() );
+
+		return new { ok = true, guid = goGuid, light_color = lc, sky_color = sc };
+	}
+
+	/// Set a GameObject's WorldRotation from Euler angles (pitch, yaw, roll
+	/// in degrees). Used for dramatic golden-hour lighting on the Sun.
+	public static object SetGameObjectRotation( JsonElement req )
+	{
+		var goGuid = req.TryGetProperty( "guid", out var g ) ? g.GetString() : null;
+		var pitch = req.TryGetProperty( "pitch", out var p ) ? p.GetSingle() : 0f;
+		var yaw = req.TryGetProperty( "yaw", out var y ) ? y.GetSingle() : 0f;
+		var roll = req.TryGetProperty( "roll", out var r ) ? r.GetSingle() : 0f;
+		if ( string.IsNullOrEmpty( goGuid ) ) throw new System.InvalidOperationException( "missing 'guid'" );
+
+		var sessionType = FindType( "Editor.SceneEditorSession" );
+		var allList = sessionType?.GetProperty( "All", BindingFlags.Public | BindingFlags.Static )?.GetValue( null ) as System.Collections.IEnumerable;
+		if ( allList == null ) throw new System.InvalidOperationException( "no editor sessions" );
+		var targetGuid = System.Guid.Parse( goGuid );
+		Sandbox.GameObject target = null;
+		foreach ( var session in allList )
+		{
+			var scene = session.GetType().GetProperty( "Scene", BindingFlags.Public | BindingFlags.Instance )?.GetValue( session ) as Sandbox.Scene;
+			if ( scene == null ) continue;
+			var go = scene.Directory.FindByGuid( targetGuid );
+			if ( go != null ) { target = go; break; }
+		}
+		if ( target == null ) throw new System.InvalidOperationException( $"GameObject {goGuid} not found in any open scene" );
+		var rot = Rotation.From( pitch, yaw, roll );
+		target.WorldRotation = rot;
+		return new { ok = true, guid = goGuid, pitch, yaw, roll, quaternion = $"{rot.x},{rot.y},{rot.z},{rot.w}" };
+	}
+
 	/// <summary>
 	/// Set a GameObject's WorldPosition directly on the running editor scene.
 	/// Bypasses the MCP scene-file validator (useful when validator is on stale
@@ -521,16 +670,24 @@ public static class TerrainGenerator
 	/// so multiple TerrainMaterial layers blend across the surface, breaking
 	/// up the obvious tiling of any single texture.
 	///
-	/// ControlMap is UInt32[]: byte 0 = layer 0 weight, byte 1 = layer 1, etc.
-	/// We write a smooth noise pattern that drifts between layers so adjacent
-	/// areas pick different sand variants.
+	/// ControlMap encoding (from sbox/.../TerrainSplatFormat.hlsl):
+	///   bits 0-4   : BaseTextureId    (5 bits, 0-31, material index)
+	///   bits 5-9   : OverlayTextureId (5 bits)
+	///   bits 10-17 : BlendFactor      (8 bits, 0=full base, 255=full overlay)
+	///   bit 18     : IsHole
+	///   bits 19-31 : Reserved
+	/// Each pixel selects TWO materials by index and blends between them.
 	/// </summary>
 	public static object PaintSplatmapNoise( JsonElement req )
 	{
 		var compGuid = req.TryGetProperty( "component_guid", out var g ) ? g.GetString() : null;
 		var seed = req.TryGetProperty( "seed", out var sEl ) ? sEl.GetInt32() : 1234;
 		var noiseScale = req.TryGetProperty( "scale", out var ns ) ? ns.GetSingle() : 4.0f;
+		var baseLayer = req.TryGetProperty( "base_layer", out var bl ) ? bl.GetInt32() : 0;
+		var overlayLayer = req.TryGetProperty( "overlay_layer", out var ol ) ? ol.GetInt32() : 1;
 		if ( string.IsNullOrEmpty( compGuid ) ) throw new System.InvalidOperationException( "missing component_guid" );
+		if ( baseLayer < 0 || baseLayer > 31 || overlayLayer < 0 || overlayLayer > 31 )
+			throw new System.InvalidOperationException( "layer indices must be 0..31" );
 
 		var terrain = FindTerrainByGuid( System.Guid.Parse( compGuid ) );
 		if ( terrain == null ) throw new System.InvalidOperationException( "Terrain not found" );
@@ -540,10 +697,10 @@ public static class TerrainGenerator
 		var ctrlProp = terrain.Storage.GetType().GetProperty( "ControlMap" );
 		var ctrl = ctrlProp?.GetValue( terrain.Storage ) as uint[];
 		if ( ctrl == null ) throw new System.InvalidOperationException( "ControlMap is null" );
-		if ( ctrl.Length != resolution * resolution )
-			throw new System.InvalidOperationException( $"ControlMap length {ctrl.Length} != {resolution * resolution}" );
 
-		// Multi-octave noise → smooth value in [0,1] per cell.
+		uint baseId = (uint)baseLayer & 0x1F;
+		uint overlayId = (uint)overlayLayer & 0x1F;
+
 		for ( int y = 0; y < resolution; y++ )
 		{
 			for ( int x = 0; x < resolution; x++ )
@@ -553,15 +710,13 @@ public static class TerrainGenerator
 				float n = ValueNoise( fx, fy, seed )
 					+ ValueNoise( fx * 2.7f, fy * 2.7f, seed + 1 ) * 0.4f
 					+ ValueNoise( fx * 6.3f, fy * 6.3f, seed + 2 ) * 0.15f;
-				n /= 1.55f; // back to ~[0,1]
+				n /= 1.55f;
 				if ( n < 0 ) n = 0;
 				else if ( n > 1 ) n = 1;
-				// Soft step to make the layer transition crisper but still smooth.
 				float w1 = (float)System.Math.Pow( n, 1.5 );
-				byte b0 = (byte)System.Math.Clamp( (int)((1f - w1) * 255f), 0, 255 );
-				byte b1 = (byte)System.Math.Clamp( (int)(w1 * 255f), 0, 255 );
-				// Pack: layer0=b0, layer1=b1, layer2=0, layer3=0
-				ctrl[y * resolution + x] = (uint)b0 | ((uint)b1 << 8);
+				uint blend = (uint)System.Math.Clamp( (int)(w1 * 255f), 0, 255 );
+				// Pack: BaseTextureId | OverlayTextureId<<5 | BlendFactor<<10
+				ctrl[y * resolution + x] = baseId | (overlayId << 5) | (blend << 10);
 			}
 		}
 
@@ -590,6 +745,68 @@ public static class TerrainGenerator
 		};
 	}
 
+	/// Set tessellation-style settings on the live Terrain component:
+	/// SubdivisionFactor (denser vertex grid for finer surface deformation)
+	/// and SubdivisionLodCount.
+	public static object SetTerrainSettings( JsonElement req )
+	{
+		var compGuid = req.TryGetProperty( "component_guid", out var g ) ? g.GetString() : null;
+		if ( string.IsNullOrEmpty( compGuid ) ) throw new System.InvalidOperationException( "missing component_guid" );
+		var terrain = FindTerrainByGuid( System.Guid.Parse( compGuid ) );
+		if ( terrain == null ) throw new System.InvalidOperationException( "Terrain not found" );
+		var t = terrain.GetType();
+		var changed = new System.Collections.Generic.Dictionary<string, object>();
+		void TrySet( string prop, JsonElement el, System.Type targetType )
+		{
+			var p = t.GetProperty( prop );
+			if ( p == null ) return;
+			object val = null;
+			if ( targetType == typeof( int ) ) val = el.GetInt32();
+			else if ( targetType == typeof( float ) ) val = el.GetSingle();
+			else if ( targetType == typeof( bool ) ) val = el.GetBoolean();
+			if ( val != null ) { p.SetValue( terrain, val ); changed[prop] = val; }
+		}
+		if ( req.TryGetProperty( "subdivision_factor", out var sf ) ) TrySet( "SubdivisionFactor", sf, typeof( int ) );
+		if ( req.TryGetProperty( "subdivision_lod_count", out var slc ) ) TrySet( "SubdivisionLodCount", slc, typeof( int ) );
+		if ( req.TryGetProperty( "clip_map_lod_levels", out var cll ) ) TrySet( "ClipMapLodLevels", cll, typeof( int ) );
+		if ( req.TryGetProperty( "clip_map_lod_extent_texels", out var clet ) ) TrySet( "ClipMapLodExtentTexels", clet, typeof( int ) );
+		try { t.GetMethod( "Create", BindingFlags.Public | BindingFlags.Instance, null, System.Type.EmptyTypes, null )?.Invoke( terrain, null ); } catch { }
+		try { terrain.GetType().GetMethod( "UpdateMaterialsBuffer", BindingFlags.Public | BindingFlags.Instance, null, System.Type.EmptyTypes, null )?.Invoke( terrain, null ); } catch { }
+		return new { ok = true, changed };
+	}
+
+	/// Toggle HeightBlend on the live terrain Storage's MaterialSettings.
+	/// Height blending samples all material slots even when their splatmap
+	/// weight is 0; with fewer than the shader's expected layers bound, the
+	/// missing slots can return error texture → magenta everywhere.
+	public static object SetHeightBlend( JsonElement req )
+	{
+		var compGuid = req.TryGetProperty( "component_guid", out var g ) ? g.GetString() : null;
+		var enabled = req.TryGetProperty( "enabled", out var e ) ? e.GetBoolean() : true;
+		if ( string.IsNullOrEmpty( compGuid ) ) throw new System.InvalidOperationException( "missing component_guid" );
+
+		var terrain = FindTerrainByGuid( System.Guid.Parse( compGuid ) );
+		if ( terrain == null || terrain.Storage == null ) throw new System.InvalidOperationException( "terrain or Storage missing" );
+		var storageType = terrain.Storage.GetType();
+		var settings = storageType.GetProperty( "MaterialSettings" )?.GetValue( terrain.Storage );
+		if ( settings == null ) throw new System.InvalidOperationException( "MaterialSettings null" );
+		var st = settings.GetType();
+		st.GetProperty( "HeightBlendEnabled" )?.SetValue( settings, enabled );
+
+		// Persist + GPU sync.
+		var assetSystem = FindType( "Editor.AssetSystem" );
+		var findByPath = assetSystem?.GetMethod( "FindByPath", BindingFlags.Public | BindingFlags.Static );
+		var storageAsset = findByPath?.Invoke( null, new object[] { "maps/dunes.terrain" } );
+		if ( storageAsset != null )
+		{
+			var saveMethod = storageAsset.GetType().GetMethod( "SaveToDisk", BindingFlags.Public | BindingFlags.Instance );
+			saveMethod?.Invoke( storageAsset, new object[] { terrain.Storage } );
+		}
+		try { terrain.GetType().GetMethod( "UpdateMaterialsBuffer", BindingFlags.Public | BindingFlags.Instance, null, System.Type.EmptyTypes, null )?.Invoke( terrain, null ); } catch { }
+		try { terrain.SyncGPUTexture(); } catch { }
+		return new { ok = true, enabled };
+	}
+
 	/// Diagnostic: report the byte-distribution of the live ControlMap.
 	/// If most cells have all 4 bytes = 0, no layer is selected and the
 	/// terrain renders error-magenta.
@@ -602,55 +819,122 @@ public static class TerrainGenerator
 		var ctrl = terrain.Storage.GetType().GetProperty( "ControlMap" )?.GetValue( terrain.Storage ) as uint[];
 		if ( ctrl == null ) throw new System.InvalidOperationException( "ControlMap null" );
 
-		long sumB0 = 0, sumB1 = 0, sumB2 = 0, sumB3 = 0;
-		long allZero = 0, b2OrB3NonZero = 0;
-		uint maxB2 = 0, maxB3 = 0;
-		// Sample — full scan is fine (1024² = 1M cells).
+		// CompactTerrainMaterial decode (TerrainSplatFormat.hlsl).
+		var matCount = (terrain.Storage.GetType().GetProperty( "Materials" )?.GetValue( terrain.Storage ) as System.Collections.ICollection)?.Count ?? 0;
+		long sumBase = 0, sumOverlay = 0, sumBlend = 0, holes = 0;
+		long invalidBase = 0, invalidOverlay = 0;
+		var baseHistogram = new System.Collections.Generic.Dictionary<int, long>();
 		for ( int i = 0; i < ctrl.Length; i++ )
 		{
 			uint v = ctrl[i];
-			byte b0 = (byte)(v & 0xff);
-			byte b1 = (byte)((v >> 8) & 0xff);
-			byte b2 = (byte)((v >> 16) & 0xff);
-			byte b3 = (byte)((v >> 24) & 0xff);
-			sumB0 += b0; sumB1 += b1; sumB2 += b2; sumB3 += b3;
-			if ( b0 == 0 && b1 == 0 && b2 == 0 && b3 == 0 ) allZero++;
-			if ( b2 != 0 || b3 != 0 ) b2OrB3NonZero++;
-			if ( b2 > maxB2 ) maxB2 = b2;
-			if ( b3 > maxB3 ) maxB3 = b3;
+			int baseId = (int)(v & 0x1F);
+			int overlayId = (int)((v >> 5) & 0x1F);
+			int blend = (int)((v >> 10) & 0xFF);
+			bool isHole = ((v >> 18) & 0x1) != 0;
+			sumBase += baseId; sumOverlay += overlayId; sumBlend += blend;
+			if ( isHole ) holes++;
+			if ( baseId >= matCount ) invalidBase++;
+			if ( overlayId >= matCount ) invalidOverlay++;
+			if ( !baseHistogram.ContainsKey( baseId ) ) baseHistogram[baseId] = 0;
+			baseHistogram[baseId]++;
 		}
 		return new
 		{
 			ok = true,
 			cells = ctrl.Length,
-			avg_b0 = sumB0 / (double)ctrl.Length,
-			avg_b1 = sumB1 / (double)ctrl.Length,
-			avg_b2 = sumB2 / (double)ctrl.Length,
-			avg_b3 = sumB3 / (double)ctrl.Length,
-			cells_all_zero = allZero,
-			cells_with_b2_or_b3 = b2OrB3NonZero,
-			max_b2 = maxB2,
-			max_b3 = maxB3,
+			materials_count = matCount,
+			avg_base_id = sumBase / (double)ctrl.Length,
+			avg_overlay_id = sumOverlay / (double)ctrl.Length,
+			avg_blend = sumBlend / (double)ctrl.Length,
+			holes,
+			invalid_base_id_cells = invalidBase,
+			invalid_overlay_id_cells = invalidOverlay,
+			base_histogram = baseHistogram,
 			first_5_raw = new[] { ctrl[0], ctrl[1], ctrl[2], ctrl[3], ctrl[4] },
 		};
 	}
 
-	/// Paint the entire ControlMap with a single layer's full weight. Use
-	/// this for diagnosis — if the terrain renders correctly with this,
-	/// the splatmap was the issue, not the materials.
+	/// Paint the splatmap so it samples ALL N material layers (not just 2)
+	/// in regional patches. Big-scale noise picks BaseTextureId per region,
+	/// medium-scale noise picks OverlayTextureId, fine noise sets BlendFactor.
+	/// Result: every part of the terrain blends two of the available layers,
+	/// and which two changes across the surface, breaking up tiling visibly.
+	public static object PaintSplatmapMultilayer( JsonElement req )
+	{
+		var compGuid = req.TryGetProperty( "component_guid", out var g ) ? g.GetString() : null;
+		var seed = req.TryGetProperty( "seed", out var sEl ) ? sEl.GetInt32() : 1234;
+		var baseScale = req.TryGetProperty( "base_scale", out var bs ) ? bs.GetSingle() : 2.0f;
+		var overlayScale = req.TryGetProperty( "overlay_scale", out var os ) ? os.GetSingle() : 5.0f;
+		var blendScale = req.TryGetProperty( "blend_scale", out var bls ) ? bls.GetSingle() : 14.0f;
+		if ( string.IsNullOrEmpty( compGuid ) ) throw new System.InvalidOperationException( "missing component_guid" );
+
+		var terrain = FindTerrainByGuid( System.Guid.Parse( compGuid ) );
+		if ( terrain == null || terrain.Storage == null ) throw new System.InvalidOperationException( "terrain or Storage missing" );
+		var ctrl = terrain.Storage.GetType().GetProperty( "ControlMap" )?.GetValue( terrain.Storage ) as uint[];
+		if ( ctrl == null ) throw new System.InvalidOperationException( "ControlMap null" );
+		var resolution = terrain.Storage.Resolution;
+		var matsList = terrain.Storage.GetType().GetProperty( "Materials" )?.GetValue( terrain.Storage ) as System.Collections.ICollection;
+		int N = matsList?.Count ?? 0;
+		if ( N < 2 ) throw new System.InvalidOperationException( $"need ≥2 layers, have {N}" );
+
+		for ( int y = 0; y < resolution; y++ )
+		{
+			for ( int x = 0; x < resolution; x++ )
+			{
+				float fx = (float)x / resolution;
+				float fy = (float)y / resolution;
+				// Big-scale noise → base layer 0..N-1
+				float nBase = ValueNoise( fx * baseScale, fy * baseScale, seed )
+					+ ValueNoise( fx * baseScale * 2, fy * baseScale * 2, seed + 11 ) * 0.4f;
+				nBase /= 1.4f;
+				int baseLayer = System.Math.Clamp( (int)(nBase * N), 0, N - 1 );
+				// Medium-scale noise → overlay layer 0..N-1 (different seed so it's independent)
+				float nOver = ValueNoise( fx * overlayScale, fy * overlayScale, seed + 23 )
+					+ ValueNoise( fx * overlayScale * 2, fy * overlayScale * 2, seed + 37 ) * 0.4f;
+				nOver /= 1.4f;
+				int overlayLayer = System.Math.Clamp( (int)(nOver * N), 0, N - 1 );
+				// Make sure overlay differs from base (otherwise blend is meaningless).
+				if ( overlayLayer == baseLayer ) overlayLayer = (overlayLayer + 1) % N;
+				// Fine-scale noise → blend factor 0..255
+				float nBlend = ValueNoise( fx * blendScale, fy * blendScale, seed + 51 );
+				int blend = System.Math.Clamp( (int)(nBlend * 255f), 0, 255 );
+				uint packed = ((uint)baseLayer & 0x1F) | (((uint)overlayLayer & 0x1F) << 5) | ((uint)blend << 10);
+				ctrl[y * resolution + x] = packed;
+			}
+		}
+
+		// Persist + GPU sync.
+		var assetSystem = FindType( "Editor.AssetSystem" );
+		var findByPath = assetSystem?.GetMethod( "FindByPath", BindingFlags.Public | BindingFlags.Static );
+		var storageAsset = findByPath?.Invoke( null, new object[] { "maps/dunes.terrain" } );
+		if ( storageAsset != null )
+		{
+			var saveMethod = storageAsset.GetType().GetMethod( "SaveToDisk", BindingFlags.Public | BindingFlags.Instance );
+			saveMethod?.Invoke( storageAsset, new object[] { terrain.Storage } );
+		}
+		try { terrain.SyncGPUTexture(); } catch { }
+		return new { ok = true, layers_used = N, base_scale = baseScale, overlay_scale = overlayScale, blend_scale = blendScale, seed };
+	}
+
+	/// Paint the entire ControlMap with a single material index. Uses the
+	/// canonical CompactTerrainMaterial encoding (BaseTextureId in bits 0-4,
+	/// BlendFactor 0 → fully baseMat).
 	public static object PaintSplatmapSolid( JsonElement req )
 	{
 		var compGuid = req.TryGetProperty( "component_guid", out var g ) ? g.GetString() : null;
 		var layer = req.TryGetProperty( "layer", out var lEl ) ? lEl.GetInt32() : 0;
 		if ( string.IsNullOrEmpty( compGuid ) ) throw new System.InvalidOperationException( "missing component_guid" );
-		if ( layer < 0 || layer > 3 ) throw new System.InvalidOperationException( "layer must be 0..3" );
+		if ( layer < 0 || layer > 31 ) throw new System.InvalidOperationException( "layer must be 0..31" );
 
 		var terrain = FindTerrainByGuid( System.Guid.Parse( compGuid ) );
 		if ( terrain == null || terrain.Storage == null ) throw new System.InvalidOperationException( "terrain or Storage missing" );
 		var ctrl = terrain.Storage.GetType().GetProperty( "ControlMap" )?.GetValue( terrain.Storage ) as uint[];
 		if ( ctrl == null ) throw new System.InvalidOperationException( "ControlMap null" );
 
-		uint v = (uint)255 << (layer * 8);
+		// CompactTerrainMaterial: BaseTextureId in bits 0-4. Same idx for
+		// Overlay so BlendFactor=0 cleanly resolves to baseMat regardless.
+		uint id = (uint)layer & 0x1F;
+		uint v = id | (id << 5);
 		for ( int i = 0; i < ctrl.Length; i++ ) ctrl[i] = v;
 
 		var assetSystem = FindType( "Editor.AssetSystem" );
@@ -682,6 +966,46 @@ public static class TerrainGenerator
 		return new { ok = true, path, compiled = result };
 	}
 
+	/// Probe a Sandbox.Material for which texture slot names actually return
+	/// non-null textures. Multi-blend materials don't expose a slot list, so
+	/// we try a wide range of common naming conventions and report what
+	/// resolves. Useful when authoring .tmats from packed material packages.
+	public static object ProbeMaterialSlots( JsonElement req )
+	{
+		var vmat = req.TryGetProperty( "vmat_path", out var v ) ? v.GetString() : null;
+		if ( string.IsNullOrEmpty( vmat ) ) throw new System.InvalidOperationException( "missing vmat_path" );
+		var material = Sandbox.Material.Load( vmat );
+		if ( material == null ) throw new System.InvalidOperationException( $"could not load {vmat}" );
+		var getTexture = material.GetType().GetMethod( "GetTexture", new[] { typeof( string ) } );
+		if ( getTexture == null ) throw new System.InvalidOperationException( "Material.GetTexture not found" );
+
+		var slots = new System.Collections.Generic.List<string>();
+		var bases = new[] { "g_tColor", "g_tNormal", "g_tAmbientOcclusion", "g_tRoughness", "g_tHeight", "g_tMask", "g_tBlend",
+			"g_tBaseColor", "g_tBaseTexture", "g_tDetailColor", "g_tOverlayColor",
+			"g_tColorA", "g_tColorB", "g_tColorC", "g_tColorD",
+			"g_tNormalA", "g_tNormalB", "g_tNormalC", "g_tNormalD",
+			"g_tAmbientOcclusionA", "g_tAmbientOcclusionB", "g_tAmbientOcclusionC", "g_tAmbientOcclusionD",
+			"g_tBlendMaskA", "g_tBlendMaskB", "g_tBlendMaskC" };
+		var nums = new[] { "", "1", "2", "3", "4" };
+		var hits = new System.Collections.Generic.List<object>();
+		foreach ( var b in bases )
+		{
+			foreach ( var n in nums )
+			{
+				var slot = b + n;
+				var tex = getTexture.Invoke( material, new object[] { slot } );
+				if ( tex == null ) continue;
+				var tt = tex.GetType();
+				var w = tt.GetProperty( "Width" )?.GetValue( tex );
+				var h = tt.GetProperty( "Height" )?.GetValue( tex );
+				var resourcePath = tt.GetProperty( "ResourcePath" )?.GetValue( tex )?.ToString();
+				var resourceName = tt.GetProperty( "ResourceName" )?.GetValue( tex )?.ToString();
+				hits.Add( new { slot, width = w, height = h, resource_path = resourcePath, resource_name = resourceName } );
+			}
+		}
+		return new { ok = true, vmat_path = vmat, slot_count = hits.Count, slots = hits };
+	}
+
 	/// Read a texture's GPU pixels and write as PNG to a project-relative path.
 	public static object ExtractMaterialTexture( JsonElement req )
 	{
@@ -700,11 +1024,36 @@ public static class TerrainGenerator
 		var width = (int)texType.GetProperty( "Width" ).GetValue( tex );
 		var height = (int)texType.GetProperty( "Height" ).GetValue( tex );
 
-		// GetPixels(int mip) → Color32[]
+		// GetPixels(int mip) → Color32[]. Engine GetPixels has a buffer cap
+		// (the same buffer is reused across calls), so for textures larger than
+		// ~512x512 mip 0 returns only the top-N pixels with the rest unfilled.
+		// Walk down mip levels until the returned count covers the full image.
 		var getPixelsMethod = texType.GetMethod( "GetPixels", new[] { typeof( int ) } );
 		if ( getPixelsMethod == null ) throw new System.InvalidOperationException( "GetPixels(int) not found" );
-		var pixelsArr = getPixelsMethod.Invoke( tex, new object[] { 0 } ) as System.Collections.IList;
-		if ( pixelsArr == null ) throw new System.InvalidOperationException( "GetPixels returned null" );
+
+		var mipsProp = texType.GetProperty( "Mips" );
+		int totalMips = mipsProp != null ? (int)mipsProp.GetValue( tex ) : 1;
+
+		// Engine's GetPixels appears to return half-linear-dimension pixels for
+		// large textures (e.g. 65536 pixels = 256x256 for what the engine reports
+		// as 512x512). Trust the actual returned count — sqrt(count) is the real
+		// dimension for square textures. Read mip 0, derive size from count.
+		System.Collections.IList pixelsArr = null;
+		try { pixelsArr = getPixelsMethod.Invoke( tex, new object[] { 0 } ) as System.Collections.IList; }
+		catch ( System.Exception ex ) { throw new System.InvalidOperationException( $"GetPixels(0) threw: {ex.GetBaseException().Message}" ); }
+		if ( pixelsArr == null ) throw new System.InvalidOperationException( "GetPixels(0) returned null" );
+		int count = pixelsArr.Count;
+		// Square assumption — if it's not square, the result will tile-pack but
+		// look wrong. None of our terrain textures are non-square.
+		int side = (int)System.Math.Sqrt( count );
+		if ( side * side != count )
+			throw new System.InvalidOperationException( $"GetPixels(0) returned {count} pixels — not a perfect square; can't infer dimensions" );
+		int mipW = side, mipH = side;
+		width = mipW;
+		height = mipH;
+		var engineW = (int)texType.GetProperty( "Width" ).GetValue( tex );
+		var engineH = (int)texType.GetProperty( "Height" ).GetValue( tex );
+		Log.Info( $"[ExtractMaterialTexture] {vmat} slot={texSlot} (engine reports {engineW}x{engineH}, GetPixels returned {count} pixels → using {mipW}x{mipH})" );
 		var c32Type = pixelsArr.Count > 0 ? pixelsArr[0].GetType() : FindType( "Color32" );
 		if ( c32Type == null ) throw new System.InvalidOperationException( "could not find Color32 type" );
 		var rField = c32Type.GetField( "r" );
